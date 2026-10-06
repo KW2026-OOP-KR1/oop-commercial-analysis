@@ -8,7 +8,7 @@ environment.yml 환경 불러와서 conda 가상 환경 생성하기
 conda env create -f environment.yml
 
 # 생성된 가상환경 활성화
-conda activate <가상환경이름>
+conda activate project_env
 ```
 
 Streamlit 앱 실행
