@@ -41,8 +41,16 @@ GENDER_COLUMNS = {
     "여성": "여성_매출_금액",
 }
 CHART_HEIGHT = 430
+MAP_HEIGHT = 550
 COLOR_DEFAULT = "#9DB2F5"
 COLOR_SELECTED = "#EF553B"
+DONUT_COLORS = ["#636EFA", "#EF553B"]
+MANWON = 10_000  # 화면에 보이는 매출 금액 단위: 만 원
+
+
+def format_manwon(won: float) -> str:
+    """원 단위 금액을 '1,234 만원' 형태로"""
+    return f"{won / MANWON:,.0f} 만원"
 
 
 @dataclass(frozen=True)
@@ -190,7 +198,7 @@ class SidebarFilterPanel:
 
     def _render_customer(self, selection: FilterSelection) -> None:
         box = self._box("👥 성별")
-        box.caption("성별을 고르면 지도 아래 요일·시간대·연령대 선택은 '전체'로 바뀝니다.")
+        box.caption("성별을 고르면 지도 아래 슬라이더가 숨겨지고 남/녀 매출 비중 도넛이 표시됩니다.")
         selection.gender = box.selectbox(
             "성별", [ALL] + list(GENDER_COLUMNS), key="gender",
             on_change=make_exclusive, args=("gender",),
@@ -218,25 +226,18 @@ class DashboardApp:
 
         visualizer = PlotlyVisualizer(current_df)
 
-        # 메인 화면: 핵심 지표(제목 바로 아래) → 3D 지도 + 슬라이더 → 동향 그래프 | 막대그래프(나란히)
-        # 지도 아래 슬라이더 하나가 지도·동향·막대·선택 항목 카드를 함께 바꾼다.
+        # 메인 화면: 핵심 지표(제목 바로 아래) → 3D 지도 + 슬라이더 | TOP 10 목록 → 선택 기준에 맞는 그래프
         self._render_metrics(current_df, region_df, selection)
         st.caption(self._describe_selection(selection))
 
         with st.container(border=True):
-            self._render_map(current_df, selection)
+            self._render_map_section(current_df, selection)
 
-        self._render_dimension_charts(visualizer, selection)
+        self._render_selection_charts(visualizer, selection)
         st.divider()
 
         st.subheader("상세 분석")
-        tab_market, tab_ratio, tab_compare, tab_data = st.tabs(
-            ["상권 TOP 10", "주중·주말 / 성별", "기간 비교", "데이터 상세"]
-        )
-        with tab_market:
-            self._render_top_markets(current_df)
-        with tab_ratio:
-            self._render_ratio_charts(visualizer)
+        tab_compare, tab_data = st.tabs(["기간 비교", "데이터 상세"])
         with tab_compare:
             self._render_comparison(region_df, selection)
         with tab_data:
@@ -283,6 +284,13 @@ class DashboardApp:
             data_filter.by_quarter(quarter)
         return data_filter.get()
 
+    @staticmethod
+    def _value_source(current_df: pd.DataFrame, selection: FilterSelection) -> pd.DataFrame:
+        """선택한 항목(요일·시간대·연령대·성별)의 매출을 '당월_매출_금액' 자리에 넣은 DataFrame.
+        지도와 TOP 10이 SalesAnalyzer의 상권별 합산을 그대로 쓰도록 하기 위함이다."""
+        value_column, _ = selection.value_column()
+        return current_df.assign(당월_매출_금액=current_df[value_column])
+
     # ------------------------------------------
     # 핵심 지표
     # ------------------------------------------
@@ -302,7 +310,7 @@ class DashboardApp:
 
         item = self._selected_item_sales(current, selection)
         cols = st.columns(5 if item else 4)
-        cols[0].metric("총매출", f"{current.get_total_sales():,.0f} 원",
+        cols[0].metric("총매출", format_manwon(current.get_total_sales()),
                        self._delta(current.get_total_sales(), base.get_total_sales() if base else None))
         cols[1].metric("총매출건수", f"{current.get_total_count():,.0f} 건",
                        self._delta(current.get_total_count(), base.get_total_count() if base else None))
@@ -312,7 +320,7 @@ class DashboardApp:
         if item:
             label, value = item
             total = current.get_total_sales()
-            cols[4].metric(f"{label} 매출", f"{value:,.0f} 원",
+            cols[4].metric(f"{label} 매출", format_manwon(value),
                            f"전체 매출의 {value / total * 100:.1f}%" if total else None, delta_color="off")
 
     @staticmethod
@@ -336,60 +344,106 @@ class DashboardApp:
         return f"{(current_value - base_value) / base_value * 100:+.1f}%"
 
     # ------------------------------------------
-    # 3D 지도
+    # 3D 지도 + 슬라이더 + TOP 10 목록
     # ------------------------------------------
 
+    def _render_map_section(self, current_df: pd.DataFrame, selection: FilterSelection) -> None:
+        """왼쪽: 3D 지도와 그 아래 슬라이더 / 오른쪽: 매출 상위 상권 TOP 10 목록"""
+        source = self._value_source(current_df, selection)
+        _, item_name = selection.value_column()
+        value_name = "매출" if item_name == ALL else f"{item_name} 매출"
+
+        map_col, top_col = st.columns([4, 1])
+        with map_col:
+            self._render_map(source, selection, value_name)
+        with top_col:
+            self._render_top_list(source, value_name)
+
     @staticmethod
-    def _render_map(current_df: pd.DataFrame, selection: FilterSelection) -> None:
-        """3D 지도와 그 아래 요일·시간대·연령대 슬라이더. 슬라이더는 하나만 적용된다."""
+    def _render_map(source: pd.DataFrame, selection: FilterSelection, value_name: str) -> None:
+        """3D 지도와 그 아래 요일·시간대·연령대 슬라이더. 성별을 고르면 슬라이더는 숨긴다."""
         st.markdown("**🗺️ 3D 상권 매출 지도**")
         # 슬라이더는 지도 아래에 두지만 지도는 슬라이더 값으로 그려야 하므로 자리만 먼저 잡아 둔다.
         map_slot = st.empty()
 
-        st.caption(
-            "슬라이더를 좌우로 드래그하면 지도와 아래 그래프가 함께 바뀝니다. 요일·시간대·연령대는 하나만 선택됩니다.  \n"
-            "기둥 높이는 상권 간 매출 비교용입니다(실제 금액은 기둥에 마우스를 올리면 표시). "
-            "산맥은 지역 매출 집중도를 나타내는 추정값입니다."
-        )
-        for col, dimension in zip(st.columns(len(DIMENSIONS)), DIMENSIONS.values()):
-            col.select_slider(
-                dimension.name, [ALL] + list(dimension.columns), key=dimension.state_key,
-                on_change=make_exclusive, args=(dimension.state_key,),
-            )
+        legend = ("기둥 높이는 상권 간 매출 비교용입니다(실제 금액은 기둥에 마우스를 올리면 표시). "
+                  "산맥은 지역 매출 집중도를 나타내는 추정값입니다.")
+        if selection.gender != ALL:
+            st.caption(f"성별({selection.gender}) 매출 기준입니다. 요일·시간대·연령대를 보려면 사이드바의 성별을 '전체'로 바꿔 주세요.  \n" + legend)
+        else:
+            st.caption("슬라이더를 좌우로 드래그하면 지도와 아래 그래프가 함께 바뀝니다. "
+                       "요일·시간대·연령대는 하나만 선택됩니다.  \n" + legend)
+            for col, dimension in zip(st.columns(len(DIMENSIONS)), DIMENSIONS.values()):
+                col.select_slider(
+                    dimension.name, [ALL] + list(dimension.columns), key=dimension.state_key,
+                    on_change=make_exclusive, args=(dimension.state_key,),
+                )
 
-        value_column, item_name = selection.value_column()
-        value_name = "매출" if item_name == ALL else f"{item_name} 매출"
-
-        # 지도용 상권별 합산은 SalesAnalyzer.get_map_data()를 그대로 쓰고,
-        # 선택한 항목의 매출 컬럼을 합산 대상으로 넘긴다.
-        source = current_df.assign(당월_매출_금액=current_df[value_column])
         map_df = SalesAnalyzer(source).get_map_data().dropna(subset=["경도", "위도"])
         if map_df.empty:
             map_slot.info("지도에 표시할 위치 데이터가 없습니다.")
             return
         deck = PydeckVisualizer(map_df, value_name=value_name).create_combined_map()
-        map_slot.pydeck_chart(deck, height=550)
+        map_slot.pydeck_chart(deck, height=MAP_HEIGHT)
+
+    @staticmethod
+    def _render_top_list(source: pd.DataFrame, value_name: str) -> None:
+        """지도 오른쪽에 작게 세로로 보이는 매출 상위 상권 TOP 10 (지도와 같은 매출 기준)"""
+        st.markdown(f"**🏆 TOP 10**  \n<small>{value_name} 기준</small>", unsafe_allow_html=True)
+        top = SalesAnalyzer(source).get_top_markets(10).reset_index(drop=True)
+        if top.empty:
+            st.caption("데이터가 없습니다.")
+            return
+        table = pd.DataFrame({
+            "순위": range(1, len(top) + 1),
+            "상권": top["상권_코드_명"],
+            "매출(만원)": (top["당월_매출_금액"] / MANWON).round(),
+        })
+        st.dataframe(
+            table, hide_index=True, width="stretch", height=MAP_HEIGHT,
+            column_config={
+                "순위": st.column_config.NumberColumn(width="small"),
+                "매출(만원)": st.column_config.NumberColumn(format="localized"),
+            },
+        )
 
     # ------------------------------------------
-    # 동향·막대 그래프 (슬라이더 기준과 연동)
+    # 지도 아래 그래프 (선택 기준과 연동)
     # ------------------------------------------
 
-    def _render_dimension_charts(self, visualizer: PlotlyVisualizer, selection: FilterSelection) -> None:
-        """슬라이더로 고른 기준(요일·시간대·연령대)의 항목별 매출을 꺾은선과 막대로 나란히 보여 준다."""
+    def _render_selection_charts(self, visualizer: PlotlyVisualizer, selection: FilterSelection) -> None:
+        """선택한 기준에 맞는 그래프를 보여 준다.
+        - 성별: 남/녀 도넛만
+        - 요일: 동향 + 막대 + 주중/주말 도넛
+        - 시간대·연령대: 동향 + 막대"""
+        if selection.gender != ALL:
+            _, center, _ = st.columns([1, 2, 1])
+            with center.container(border=True):
+                st.markdown("**🍩 남/녀 매출 비중**")
+                sales = visualizer.analyzer.get_gender_sales()
+                self._show_chart(self._donut_figure(sales, "남/녀 매출 비중", selection.gender), "gender_donut")
+            return
+
         dimension, item = selection.dimension, selection.dimension_item
         summary = dimension.summary(visualizer.analyzer)
+        show_weekend = dimension.state_key == "map_weekday"
 
-        left, right = st.columns(2)
-        with left.container(border=True):
+        cols = st.columns(3 if show_weekend else 2)
+        with cols[0].container(border=True):
             st.markdown(f"**📈 {dimension.name}별 매출 동향**")
             self._show_chart(self._trend_figure(visualizer, summary, dimension.name, item), "main_trend_chart")
-        with right.container(border=True):
+        with cols[1].container(border=True):
             st.markdown(f"**📊 {dimension.name}별 매출 비교**")
             self._show_chart(self._bar_figure(visualizer, summary, dimension.name, item), "main_bar_chart")
+        if show_weekend:
+            with cols[2].container(border=True):
+                st.markdown("**🍩 주중/주말 매출 비중**")
+                sales = visualizer.analyzer.get_weekday_weekend_sales()
+                self._show_chart(self._donut_figure(sales, "주중/주말 매출 비중"), "weekend_donut")
 
     @staticmethod
     def _show_chart(fig: go.Figure, key: str) -> None:
-        """나란히 놓인 두 차트의 높이를 맞춰서 그린다."""
+        """나란히 놓인 차트의 높이를 맞춰서 그린다."""
         fig.update_layout(height=CHART_HEIGHT, margin=dict(t=60, b=40, l=40, r=20))
         st.plotly_chart(fig, width="stretch", key=key)
 
@@ -399,14 +453,15 @@ class DashboardApp:
 
     def _trend_figure(self, visualizer: PlotlyVisualizer, summary: pd.DataFrame,
                       name: str, item: str) -> go.Figure:
-        """항목별 매출 꺾은선. 최고·최저 항목은 굵은 점, 슬라이더로 고른 항목은 별로 표시"""
+        """항목별 매출 꺾은선(만원). 최고·최저 항목은 굵은 점, 슬라이더로 고른 항목은 별로 표시"""
         if summary.empty:
             return self._empty_figure(f"{name}별 매출 데이터가 없습니다.")
-        labels, values = summary["구분"].tolist(), summary["매출금액"].tolist()
+        labels = summary["구분"].tolist()
+        values = (summary["매출금액"] / MANWON).tolist()
         fig = visualizer.line_renderer.render(
             labels, values, f"{name}별 매출 추이 및 최고/최저",
-            x_title=name, y_title="매출 금액 (원)",
-            hovertemplate="%{x}<br>매출: %{y:,.0f}원<extra></extra>",
+            x_title=name, y_title="매출 금액 (만 원)",
+            hovertemplate="%{x}<br>매출: %{y:,.0f}만원<extra></extra>",
         )
         marks = [
             (values.index(max(values)), "최고", "red", "diamond", "top center"),
@@ -420,54 +475,45 @@ class DashboardApp:
                 text=[mark], textposition=position,
                 marker=dict(size=16 if mark == "선택" else 14, color=color, symbol=symbol,
                             line=dict(width=1, color="black")),
-                hovertemplate=f"{mark}: %{{x}}<br>매출: %{{y:,.0f}}원<extra></extra>",
+                hovertemplate=f"{mark}: %{{x}}<br>매출: %{{y:,.0f}}만원<extra></extra>",
             ))
         return fig
 
     def _bar_figure(self, visualizer: PlotlyVisualizer, summary: pd.DataFrame,
                     name: str, item: str) -> go.Figure:
-        """항목별 매출 막대. 마우스를 올리면 매출액과 비중, 슬라이더로 고른 항목은 다른 색으로 강조"""
+        """항목별 매출 막대(만원). 마우스를 올리면 매출액과 비중, 슬라이더로 고른 항목은 다른 색으로 강조"""
         if summary.empty:
             return self._empty_figure(f"{name}별 매출 데이터가 없습니다.")
-        labels, values = summary["구분"].tolist(), summary["매출금액"].tolist()
+        labels = summary["구분"].tolist()
+        values = (summary["매출금액"] / MANWON).tolist()
         total = sum(values)
         ratios = [value / total * 100 if total else 0 for value in values]
         fig = visualizer.bar_renderer.render(
             labels, values, f"{name}별 매출 및 비중 비교",
-            x_title=name, y_title="매출 금액 (원)",
+            x_title=name, y_title="매출 금액 (만 원)",
             texttemplate="%{customdata:.1f}%", customdata=ratios,
-            hovertemplate="%{x}<br>매출: %{y:,.0f}원<br>비중: %{customdata:.1f}%<extra></extra>",
+            hovertemplate="%{x}<br>매출: %{y:,.0f}만원<br>비중: %{customdata:.1f}%<extra></extra>",
         )
         fig.update_traces(marker_color=[COLOR_SELECTED if label == item else COLOR_DEFAULT for label in labels])
+        return fig
+
+    def _donut_figure(self, sales: dict[str, float], title: str, highlight: str = ALL) -> go.Figure:
+        """항목 2개(주중/주말, 남/녀)의 매출 비중 도넛(만원). 고른 항목은 조각을 살짝 떼어 강조"""
+        if not sales or sum(sales.values()) == 0:
+            return self._empty_figure(f"{title} 데이터가 없습니다.")
+        labels = list(sales)
+        fig = go.Figure(go.Pie(
+            labels=labels, values=[value / MANWON for value in sales.values()], hole=0.45,
+            textinfo="label+percent", sort=False, marker=dict(colors=DONUT_COLORS),
+            pull=[0.08 if label == highlight else 0 for label in labels],
+            hovertemplate="%{label}<br>매출: %{value:,.0f}만원<br>비중: %{percent}<extra></extra>",
+        ))
+        fig.update_layout(title=title, template="plotly_white", showlegend=False)
         return fig
 
     # ------------------------------------------
     # 상세 분석
     # ------------------------------------------
-
-    @staticmethod
-    def _render_top_markets(current_df: pd.DataFrame) -> None:
-        """매출 상위 상권 TOP 10"""
-        top_markets = SalesAnalyzer(current_df).get_top_markets(10)
-        st.bar_chart(top_markets, x="상권_코드_명", y="당월_매출_금액",
-                     x_label="상권", y_label="매출 금액 (원)", horizontal=True)
-
-    def _render_ratio_charts(self, visualizer: PlotlyVisualizer) -> None:
-        """주중/주말·성별 매출 비중 막대 (항목이 적은 비교)"""
-        sales = visualizer.analyzer.get_weekday_weekend_sales()
-        total = sum(sales.values())
-        weekend_fig = visualizer.bar_renderer.render(
-            list(sales.keys()), list(sales.values()), "주중 / 주말 매출 및 비중 비교",
-            x_title="구분", y_title="매출 금액 (원)",
-            texttemplate="%{customdata:.1f}%",
-            customdata=[value / total * 100 if total else 0 for value in sales.values()],
-            hovertemplate="%{x}<br>매출: %{y:,.0f}원<br>비중: %{customdata:.1f}%<extra></extra>",
-        )
-        left, right = st.columns(2)
-        with left:
-            self._show_chart(weekend_fig, "ratio_weekend_chart")
-        with right:
-            self._show_chart(visualizer.create_gender_sales(), "ratio_gender_chart")
 
     @staticmethod
     def _render_comparison(region_df: pd.DataFrame, selection: FilterSelection) -> None:
