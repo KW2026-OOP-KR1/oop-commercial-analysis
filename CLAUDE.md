@@ -1165,7 +1165,7 @@ PydeckVisualizer에서 생성한 Deck 객체를 렌더링한다.
 
 * `filter_analyzer`: `load_data()`, `DataFilter`(`by_year`, `by_quarter`, `by_district`, `by_market_type`, `by_market`, `by_business`, `get`), `SalesAnalyzer`(`get_total_sales`, `get_total_count`, `get_average_spending`, `get_top_markets`, `get_gender_sales`, `get_age_sales`, `get_map_data`)
 * `viz_plotly`: `create_weekday_sales`, `create_weekday_weekend_sales`, `create_time_sales`, `create_gender_sales`, `create_age_sales`, `create_quarter_comparison` (`viz_plotly` 브랜치가 main에 먼저 병합되어야 함)
-* `viz_pydeck`: `create_column_map()`. `경도`, `위도`, `매출금액` 컬럼을 받으므로 app에서 `get_map_data()` 결과를 억 원 단위 `매출금액`으로 변환해 전달
+* `viz_pydeck`: `PydeckVisualizer(map_df, value_name=...).create_combined_map()` (기둥 + 가우스 산맥). `map_df`는 `SalesAnalyzer.get_map_data()` 결과이며, 선택한 요일/시간대 매출을 `당월_매출_금액` 자리에 넣어 전달하고 `value_name`(예: "토요일 매출")은 툴팁에 표시
 
 #### 원칙
 

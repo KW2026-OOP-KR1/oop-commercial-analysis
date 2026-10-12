@@ -326,7 +326,11 @@ class DashboardApp:
         # 슬라이더는 지도 아래에 두지만 지도는 슬라이더 값으로 그려야 하므로 자리만 먼저 잡아 둔다.
         map_slot = st.empty()
 
-        st.caption("슬라이더를 좌우로 드래그해 선택하세요. 요일과 시간대는 동시에 선택할 수 없습니다. 기둥 높이 단위: 억 원")
+        st.caption(
+            "슬라이더를 좌우로 드래그해 선택하세요. 요일과 시간대는 동시에 선택할 수 없습니다.  \n"
+            "기둥 높이는 상권 간 매출 비교용입니다(실제 금액은 기둥에 마우스를 올리면 표시). "
+            "산맥은 지역 매출 집중도를 나타내는 추정값입니다."
+        )
         col1, col2 = st.columns(2)
         weekday = col1.select_slider(
             "요일", [ALL] + list(WEEKDAY_COLUMNS), key="map_weekday",
@@ -337,11 +341,11 @@ class DashboardApp:
             on_change=make_exclusive, args=("map_time", "map_weekday"),
         )
 
-        value_column = "당월_매출_금액"
+        value_column, value_name = "당월_매출_금액", "매출"
         if weekday != ALL:
-            value_column = WEEKDAY_COLUMNS[weekday]
+            value_column, value_name = WEEKDAY_COLUMNS[weekday], f"{weekday} 매출"
         elif time_slot != ALL:
-            value_column = TIME_COLUMNS[time_slot]
+            value_column, value_name = TIME_COLUMNS[time_slot], f"{time_slot} 매출"
 
         # 지도용 상권별 합산은 SalesAnalyzer.get_map_data()를 그대로 쓰고,
         # 선택한 요일/시간대 컬럼을 합산 대상으로 넘긴다.
@@ -350,9 +354,8 @@ class DashboardApp:
         if map_df.empty:
             map_slot.info("지도에 표시할 위치 데이터가 없습니다.")
             return
-        # PydeckVisualizer는 '매출금액' 컬럼을 높이로 사용한다.
-        map_df["매출금액"] = map_df["당월_매출_금액"] / 1e8
-        map_slot.pydeck_chart(PydeckVisualizer(map_df).create_column_map(), height=550)
+        deck = PydeckVisualizer(map_df, value_name=value_name).create_combined_map()
+        map_slot.pydeck_chart(deck, height=550)
 
 
 st.set_page_config(page_title="서울시 상권 분석 대시보드", layout="wide")
