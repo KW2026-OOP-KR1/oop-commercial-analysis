@@ -68,6 +68,57 @@ class LineChartRenderer(ChartRenderer):
         return fig
 
 
+class DonutChartRenderer(ChartRenderer):
+    """도넛 차트 전담 렌더러 (주중/주말 비중 등에 활용)"""
+    def render(self, labels, values, title, x_title="구분", y_title="금액", **kwargs):
+        hole = kwargs.get("hole", 0.4)
+        hovertemplate = kwargs.get("hovertemplate", "%{label}<br>매출: %{value:,.0f}원<br>비중: %{percent}<extra></extra>")
+
+        fig = go.Figure(data=[go.Pie(
+            labels=labels, 
+            values=values, 
+            hole=hole, 
+            textinfo="label+percent",
+            hovertemplate=hovertemplate
+        )])
+        fig.update_layout(
+            title=title,
+            template="plotly_white"
+        )
+        return fig
+
+
+class RadarChartRenderer(ChartRenderer):
+    """레이더(폴라) 차트 전담 렌더러 (요일별 편중도 등에 활용)"""
+    def render(self, labels, values, title, x_title="구분", y_title="금액", **kwargs):
+        # 레이더 차트 특성상 시작점과 끝점을 연결하기 위해 첫 번째 값을 마지막에 추가
+        radar_labels = labels + [labels[0]]
+        radar_values = values + [values[0]]
+        line_color = kwargs.get("line_color", "orange")
+        hovertemplate = kwargs.get("hovertemplate", "%{theta}<br>매출: %{r:,.0f}원<extra></extra>")
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatterpolar(
+            r=radar_values,
+            theta=radar_labels,
+            fill='toself',
+            name=title,
+            line=dict(color=line_color, width=2),
+            hovertemplate=hovertemplate
+        ))
+
+        max_val = max(values) * 1.1 if values else 1
+        fig.update_layout(
+            title=title,
+            polar=dict(
+                radialaxis=dict(visible=True, range=[0, max_val])
+            ),
+            template="plotly_white",
+            showlegend=False
+        )
+        return fig
+
+
 # ==========================================
 # 3. 시각화 메인 클래스
 # ==========================================
@@ -78,6 +129,8 @@ class PlotlyVisualizer:
         self.analyzer = SalesAnalyzer(df)
         self.bar_renderer = BarChartRenderer()
         self.line_renderer = LineChartRenderer()
+        self.donut_renderer = DonutChartRenderer()
+        self.radar_renderer = RadarChartRenderer()
 
     def _empty_figure(self, message):
         fig = go.Figure()
@@ -187,7 +240,7 @@ class PlotlyVisualizer:
         return fig, table
 
     # ==========================================
-    # 3. 시간대별 매출 => 꺾은선 그래프 (LineChartRenderer) 적용
+    # 3. 시간대별 매출 => 꺾은선 렌더러 적용
     # ==========================================
     def create_time_sales(self):
         time_df = self.analyzer.get_time_sales()
@@ -200,7 +253,6 @@ class PlotlyVisualizer:
         peak_idx = int(np.argmax(values))
         low_idx = int(np.argmin(values))
 
-        # 꺾은선 렌더러 사용
         fig = self.line_renderer.render(
             labels, values, 
             "시간대별 매출 추이 및 피크/최저 시간대", 
@@ -227,7 +279,7 @@ class PlotlyVisualizer:
         return fig
 
     # ==========================================
-    # 4. 성별 매출 => 막대 그래프 (BarChartRenderer)
+    # 4. 성별 매출 => 막대 렌더러 적용
     # ==========================================
     def create_gender_sales(self):
         gender_data = self.analyzer.get_gender_sales()
@@ -249,7 +301,7 @@ class PlotlyVisualizer:
         return fig
 
     # ==========================================
-    # 5. 주중 / 주말 매출 => 도넛 차트 (Donut Chart) 적용
+    # 5. 주중 / 주말 매출 => 도넛 렌더러 적용
     # ==========================================
     def create_weekday_weekend_sales(self):
         ww_data = self.analyzer.get_weekday_weekend_sales()
@@ -259,21 +311,13 @@ class PlotlyVisualizer:
         labels = list(ww_data.keys())
         values = list(ww_data.values())
 
-        fig = go.Figure(data=[go.Pie(
-            labels=labels, 
-            values=values, 
-            hole=0.4,  # 도넛 차트 효과
-            textinfo="label+percent",
-            hovertemplate="%{label}<br>매출: %{y:,.0f}원<br>비중: %{percent}<extra></extra>" if hasattr(go, 'Pie') else None
-        )])
-        fig.update_layout(
-            title="주중 / 주말 매출 비중 비교",
-            template="plotly_white"
+        return self.donut_renderer.render(
+            labels, values,
+            title="주중 / 주말 매출 비중 비교"
         )
-        return fig
 
     # ==========================================
-    # 6. 요일별(월~일) 매출 => 레이더 차트 (Radar / Polar Chart) 적용
+    # 6. 요일별(월~일) 매출 => 레이더 렌더러 적용
     # ==========================================
     def create_weekday_sales(self):
         weekday_df = self.analyzer.get_weekday_sales()
@@ -283,32 +327,13 @@ class PlotlyVisualizer:
         labels = weekday_df["구분"].tolist()
         values = weekday_df["매출금액"].tolist() if "매출금액" in weekday_df.columns else []
 
-        # 레이더 차트 특성상 시작점과 끝점을 연결하기 위해 첫 번째 값을 마지막에 한 번 더 붙여줌
-        radar_labels = labels + [labels[0]]
-        radar_values = values + [values[0]]
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatterpolar(
-            r=radar_values,
-            theta=radar_labels,
-            fill='toself',
-            name='요일별 매출',
-            line=dict(color='orange', width=2),
-            hovertemplate="%{theta}<br>매출: %{r:,.0f}원<extra></extra>"
-        ))
-
-        fig.update_layout(
-            title="요일별(월~일) 매출 편중도 분석 (레이더 차트)",
-            polar=dict(
-                radialaxis=dict(visible=True, range=[0, max(values) * 1.1 if values else 1])
-            ),
-            template="plotly_white",
-            showlegend=False
+        return self.radar_renderer.render(
+            labels, values,
+            title="요일별(월~일) 매출 편중도 분석 (레이더 차트)"
         )
-        return fig
 
     # ==========================================
-    # 7. 연령대별 매출 => 막대 그래프 (BarChartRenderer)
+    # 7. 연령대별 매출 => 막대 렌더러 적용
     # ==========================================
     def create_age_sales(self):
         age_df = self.analyzer.get_age_sales()
