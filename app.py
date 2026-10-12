@@ -321,15 +321,18 @@ class DashboardApp:
 
     @staticmethod
     def _render_map(current_df: pd.DataFrame) -> None:
-        """요일 또는 시간대를 드롭다운으로 골라 3D 지도를 그린다. 요일과 시간대는 동시에 적용하지 않는다."""
-        title, col1, col2 = st.columns([2, 1, 1], vertical_alignment="bottom")
-        title.markdown("**🗺️ 3D 상권 매출 지도**")
-        title.caption("요일과 시간대는 동시에 선택할 수 없습니다. 기둥 높이 단위: 억 원")
-        weekday = col1.selectbox(
+        """지도 아래 슬라이더로 요일 또는 시간대를 골라 3D 지도를 그린다. 요일과 시간대는 동시에 적용하지 않는다."""
+        st.markdown("**🗺️ 3D 상권 매출 지도**")
+        # 슬라이더는 지도 아래에 두지만 지도는 슬라이더 값으로 그려야 하므로 자리만 먼저 잡아 둔다.
+        map_slot = st.empty()
+
+        st.caption("슬라이더를 좌우로 드래그해 선택하세요. 요일과 시간대는 동시에 선택할 수 없습니다. 기둥 높이 단위: 억 원")
+        col1, col2 = st.columns(2)
+        weekday = col1.select_slider(
             "요일", [ALL] + list(WEEKDAY_COLUMNS), key="map_weekday",
             on_change=make_exclusive, args=("map_weekday", "map_time"),
         )
-        time_slot = col2.selectbox(
+        time_slot = col2.select_slider(
             "시간대", [ALL] + list(TIME_COLUMNS), key="map_time",
             on_change=make_exclusive, args=("map_time", "map_weekday"),
         )
@@ -345,11 +348,11 @@ class DashboardApp:
         source = current_df.assign(당월_매출_금액=current_df[value_column])
         map_df = SalesAnalyzer(source).get_map_data().dropna(subset=["경도", "위도"])
         if map_df.empty:
-            st.info("지도에 표시할 위치 데이터가 없습니다.")
+            map_slot.info("지도에 표시할 위치 데이터가 없습니다.")
             return
         # PydeckVisualizer는 '매출금액' 컬럼을 높이로 사용한다.
         map_df["매출금액"] = map_df["당월_매출_금액"] / 1e8
-        st.pydeck_chart(PydeckVisualizer(map_df).create_column_map(), height=550)
+        map_slot.pydeck_chart(PydeckVisualizer(map_df).create_column_map(), height=550)
 
 
 st.set_page_config(page_title="서울시 상권 분석 대시보드", layout="wide")
