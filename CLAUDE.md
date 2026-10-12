@@ -1037,11 +1037,16 @@ PydeckVisualizer에서 생성한 Deck 객체를 렌더링한다.
 
 위치 데이터가 없는 상권은 지도에서 제외하되, 통계 분석에서 제외할지는 별도로 판단한다.
 
-#### 3D 지도의 요일·시간대 선택
+#### 3D 지도 아래 슬라이더 (요일·시간대·연령대)
 
-* 요일과 시간대는 **지도 바로 아래에 있는 좌우 드래그 슬라이더**로 선택한다. (각 슬라이더의 맨 왼쪽은 "전체")
-* 요일과 시간대는 동시에 반영할 수 없으므로, 하나를 선택하면 다른 하나는 "전체"로 바뀐다.
-* 선택한 요일 또는 시간대의 매출 컬럼으로 지도의 높이와 색상을 갱신한다.
+* 요일·시간대·연령대는 **지도 바로 아래에 있는 좌우 드래그 슬라이더**로 선택한다. (각 슬라이더의 맨 왼쪽은 "전체")
+* 요일·시간대·연령대·성별은 서로 독립적으로 집계되어 있으므로 **한 번에 하나만** 적용한다. 하나를 선택하면 나머지는 "전체"로 바뀐다. (성별은 사이드바에 있음)
+* 선택한 항목의 매출 컬럼으로 지도의 높이와 색상을 갱신한다.
+* 슬라이더 하나가 **지도 · 동향 그래프 · 막대그래프 · 선택 항목 매출 카드**를 함께 바꾼다. 그래프마다 따로 기준을 고르는 버튼은 두지 않는다.
+  * 동향 그래프(꺾은선): 마지막으로 움직인 슬라이더 기준의 항목별 매출 (요일이면 월~일, 시간대면 00~24시, 연령대면 10대~60대 이상). 최고·최저는 굵은 점, 선택한 항목은 별로 표시
+  * 막대그래프: 같은 기준의 항목별 매출과 비중, 선택한 항목은 다른 색으로 강조
+  * 아무 슬라이더도 움직이지 않았으면 요일 기준으로 표시
+* 주중/주말·성별처럼 항목이 2개인 비교는 "상세 분석" 탭의 막대그래프로 보여 준다.
 
 ### 10. 필터 연동
 
@@ -1117,28 +1122,35 @@ PydeckVisualizer에서 생성한 Deck 객체를 렌더링한다.
 #### 담당 기능
 
 * 대시보드 전체 화면 구성
-  * 메인 화면 (한 화면): 핵심 지표 카드(제목 바로 아래) → 현재 조건 요약 → 3D 지도(크게) → 매출 동향 그래프 | 매출 비교 막대그래프 (나란히)
-  * 상세 분석 탭: 상권 TOP 10 · 기간 비교 · 데이터 상세
-  * 사이드바: 기간 · 지역 · 업종 · 고객층을 테두리 박스로 구분
+  * 메인 화면 (한 화면): 핵심 지표 카드(제목 바로 아래) → 현재 조건 요약 → 3D 지도(크게) + 요일·시간대·연령대 슬라이더 → 동향 그래프 | 막대그래프 (나란히, 슬라이더와 연동)
+  * 상세 분석 탭: 상권 TOP 10 · 주중·주말 / 성별 · 기간 비교 · 데이터 상세
+  * 사이드바: 기간 · 지역 · 업종 · 성별을 테두리 박스로 구분
 * 사이드바 필터 UI 구현
-* 핵심 지표 카드 구현 (기간 비교 시 증감 표시)
-* 필터 간 상호 배타 처리 (성별↔연령대, 요일↔시간대)
+* 핵심 지표 카드 구현 (기간 비교 시 증감, 항목 선택 시 해당 항목 매출 카드)
+* 상호 배타 처리 (요일·시간대·연령대·성별 중 하나만)
 * 분석 클래스 호출 및 Plotly·Pydeck 시각화 통합
 * 필터 변경에 따른 갱신 확인
 * 전체 실행 테스트
-* GitHub 브랜치 및 통합 관리
+* GitHub 브랜치 및 통합 관리, 배포
 
 #### 클래스(객체) 구성
 
 | 클래스 / 함수 | 종류 | 역할 |
 | --- | --- | --- |
-| `FilterSelection` | dataclass | 사용자가 선택한 필터 값 묶음 (연도, 분기, 자치구, 상권 유형, 상권, 업종, 성별, 연령대, 기간 비교 여부와 기준 기간) |
+| `SalesDimension` | dataclass (불변) | 분석 기준 하나(요일·시간대·연령대)의 정보: 슬라이더 키, 항목별 매출 컬럼, 항목별 매출을 돌려주는 `SalesAnalyzer` 메서드. `summary()`로 항목별 매출 표를 반환 |
+| `FilterSelection` | dataclass | 사용자가 선택한 조건 묶음 (기간, 지역, 업종, 성별, 기간 비교, 슬라이더 기준과 항목) |
 | `SidebarFilterPanel` | 클래스 | 사이드바 위젯을 그리고 선택값을 `FilterSelection`으로 반환 |
 | `DashboardApp` | 클래스 | 필터 적용 → 분석 → 시각화 렌더링을 연결하는 통합 클래스 |
 | `load_dashboard_data()` | 함수 | `filter_analyzer.load_data()`로 데이터 로드 (`@st.cache_data`로 캐싱) |
-| `make_exclusive()` | 함수 | 상호 배타 필터 콜백. 한쪽을 고르면 다른 쪽을 "전체"로 되돌림 |
+| `make_exclusive()` | 함수 | 상호 배타 콜백. 하나를 고르면 나머지(요일·시간대·연령대·성별)를 "전체"로 되돌리고, 움직인 슬라이더를 그래프 기준으로 기억 |
 
 #### 세부 역할 (메서드 단위)
+
+**`FilterSelection`**
+
+* `has_single_period()`: 연도·분기가 하나씩 정해졌는지 (기간 비교 가능 여부)
+* `load_dimension_state()`: 슬라이더에서 고른 기준과 항목을 읽어 옴
+* `value_column()`: 지도 높이와 선택 항목 카드에 쓸 매출 컬럼과 이름
 
 **`SidebarFilterPanel`**
 
@@ -1147,7 +1159,7 @@ PydeckVisualizer에서 생성한 Deck 객체를 렌더링한다.
 * `_render_period()`: 연도·분기 선택, "다른 기간과 비교" 체크 시 기준 연도·분기 선택 (연도와 분기를 하나씩 골랐을 때만 활성화)
 * `_render_region()`: 자치구·상권 유형·상권 선택. 상권 목록은 선택한 자치구·유형에 속한 것만 표시
 * `_render_business()`: 업종 복수 선택 (미선택 시 전체)
-* `_render_customer()`: 성별·연령대 선택 (상호 배타)
+* `_render_customer()`: 성별 선택 (고르면 슬라이더는 "전체"로)
 
 **`DashboardApp`**
 
@@ -1155,20 +1167,21 @@ PydeckVisualizer에서 생성한 Deck 객체를 렌더링한다.
 * `_apply_region_filters()`: 기간을 제외한 지역·업종 필터 적용 (`DataFilter` 사용). 기간 비교 시 두 기간에 같은 조건을 쓰기 위해 기간 필터와 분리
 * `_apply_period_filter()`: 연도·분기 필터 적용
 * `_describe_selection()`: 현재 적용 중인 필터를 한 줄로 요약해 화면 상단에 표시
-* `_render_metrics()`: 총매출·총매출건수·평균 객단가·상권 수 카드, 기간 비교 시 증감률(%) 표시, 성별/연령대를 고르면 해당 고객층 매출과 비중 카드 추가
-* `_render_trend_chart()`: 매출 동향 꺾은선. 시간대별 / 요일별(월~일) 전환, 최고·최저 지점을 굵은 점으로 표시
-* `_weekday_trend_figure()`, `_weekday_weekend_bar_figure()`: 요일별 꺾은선·주중/주말 막대. `PlotlyVisualizer`의 레이더·도넛 차트 대신 같은 클래스의 `line_renderer`·`bar_renderer`로 그림 (viz_plotly에 꺾은선·막대 버전이 생기면 교체)
-* `_render_bar_chart()`: 매출 비교 막대그래프. 성별 / 연령대 / 주중·주말 전환. 사이드바에서 연령대를 고르면 연령대 그래프가 기본
+* `_render_metrics()`: 총매출·총매출건수·평균 객단가·상권 수 카드, 기간 비교 시 증감률(%), 항목(요일·시간대·연령대·성별)을 고르면 해당 항목 매출과 비중 카드 추가
+* `_render_map()`: 3D 지도(기둥 + 가우스 산맥)와 그 아래 슬라이더 3개
+* `_render_dimension_charts()`: 슬라이더 기준의 동향 그래프와 막대그래프를 나란히 표시
+* `_trend_figure()`: 항목별 매출 꺾은선, 최고·최저 굵은 점, 선택 항목 별 표시
+* `_bar_figure()`: 항목별 매출·비중 막대, 선택 항목 색 강조, 마우스 오버 시 수치
 * `_show_chart()`: 나란히 놓인 두 차트의 높이를 맞춰서 그림
 * `_render_top_markets()`: 매출 상위 상권 TOP 10
+* `_render_ratio_charts()`: 주중/주말·성별 매출 비중 막대
 * `_render_comparison()`: 기준 기간 대비 비교 기간 워터폴 차트와 증감 표
-* `_render_map()`: 지도 아래 요일·시간대 슬라이더(상호 배타) → 해당 매출 컬럼으로 3D 지도 높이 결정
 
 #### 다른 모듈과의 연결 (의존 인터페이스)
 
-* `filter_analyzer`: `load_data()`, `DataFilter`(`by_year`, `by_quarter`, `by_district`, `by_market_type`, `by_market`, `by_business`, `get`), `SalesAnalyzer`(`get_total_sales`, `get_total_count`, `get_average_spending`, `get_top_markets`, `get_gender_sales`, `get_age_sales`, `get_map_data`)
-* `viz_plotly`: `create_weekday_sales`, `create_weekday_weekend_sales`, `create_time_sales`, `create_gender_sales`, `create_age_sales`, `create_quarter_comparison`
-* `viz_pydeck`: `PydeckVisualizer(map_df, value_name=...).create_combined_map()` (기둥 + 가우스 산맥). `map_df`는 `SalesAnalyzer.get_map_data()` 결과이며, 선택한 요일/시간대 매출을 `당월_매출_금액` 자리에 넣어 전달하고 `value_name`(예: "토요일 매출")은 툴팁에 표시
+* `filter_analyzer`: `load_data()`, `DataFilter`(`by_year`, `by_quarter`, `by_district`, `by_market_type`, `by_market`, `by_business`, `get`), `SalesAnalyzer`(`get_total_sales`, `get_total_count`, `get_average_spending`, `get_top_markets`, `get_weekday_sales`, `get_time_sales`, `get_age_sales`, `get_gender_sales`, `get_weekday_weekend_sales`, `get_map_data`)
+* `viz_plotly`: `PlotlyVisualizer`의 `analyzer`, `line_renderer`(`LineChartRenderer`), `bar_renderer`(`BarChartRenderer`), `create_gender_sales`, `create_quarter_comparison`. 분석 그래프는 꺾은선·막대만 쓰므로 레이더(`create_weekday_sales`)·도넛(`create_weekday_weekend_sales`)은 사용하지 않는다.
+* `viz_pydeck`: `PydeckVisualizer(map_df, value_name=...).create_combined_map()` (기둥 + 가우스 산맥). `map_df`는 `SalesAnalyzer.get_map_data()` 결과이며, 선택한 항목의 매출을 `당월_매출_금액` 자리에 넣어 전달하고 `value_name`(예: "토요일 매출")은 툴팁에 표시
 
 #### 원칙
 
