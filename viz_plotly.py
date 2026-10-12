@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -5,27 +6,82 @@ from plotly.subplots import make_subplots
 
 from filter_analyzer import SalesAnalyzer, DataFilter
 
+
+# ==========================================
+# 1. 렌더러 추상 클래스 
+# ==========================================
+class ChartRenderer(ABC):
+    @abstractmethod
+    def render(self, labels, values, title, x_title="구분", y_title="금액", **kwargs):
+        pass
+
+
+# ==========================================
+# 2. 구체적인 렌더러 클래스들 
+# ==========================================
+class BarChartRenderer(ChartRenderer):
+    """막대 그래프 전담 렌더러"""
+    def render(self, labels, values, title, x_title="구분", y_title="금액", **kwargs):
+        text = kwargs.get("text", None)
+        texttemplate = kwargs.get("texttemplate", None)
+        customdata = kwargs.get("customdata", None)
+        hovertemplate = kwargs.get("hovertemplate", f"%{{x}}<br>{y_title}: %{{y:,.0f}}<extra></extra>")
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=labels, y=values,
+            text=text if text is not None else (values if texttemplate else None),
+            texttemplate=texttemplate,
+            textposition="outside" if (texttemplate or text is not None) else None,
+            customdata=customdata,
+            hovertemplate=hovertemplate
+        ))
+        fig.update_layout(
+            title=title, xaxis_title=x_title, yaxis_title=y_title, 
+            template="plotly_white", hovermode="x unified"
+        )
+        return fig
+
+
+class LineChartRenderer(ChartRenderer):
+    """꺾은선 그래프 전담 렌더러 (시간대별 추이 등에 활용)"""
+    def render(self, labels, values, title, x_title="구분", y_title="금액", **kwargs):
+        text = kwargs.get("text", None)
+        customdata = kwargs.get("customdata", None)
+        hovertemplate = kwargs.get("hovertemplate", f"%{{x}}<br>{y_title}: %{{y:,.0f}}<extra></extra>")
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=labels, y=values,
+            mode="lines+markers+text" if text is not None else "lines+markers",
+            text=text,
+            textposition="top center" if text is not None else None,
+            customdata=customdata,
+            hovertemplate=hovertemplate,
+            line=dict(width=3, color="#636EFA"),
+            marker=dict(size=8)
+        ))
+        fig.update_layout(
+            title=title, xaxis_title=x_title, yaxis_title=y_title, 
+            template="plotly_white", hovermode="x unified"
+        )
+        return fig
+
+
+# ==========================================
+# 3. 시각화 메인 클래스
+# ==========================================
 class PlotlyVisualizer:
 
     def __init__(self, df: pd.DataFrame):
         self.df = df.copy()
         self.analyzer = SalesAnalyzer(df)
+        self.bar_renderer = BarChartRenderer()
+        self.line_renderer = LineChartRenderer()
 
     def _empty_figure(self, message):
         fig = go.Figure()
         fig.update_layout(title=message, template="plotly_white")
-        return fig
-
-    def _bar_figure(self, labels, values, title, x_title="구분", y_title="금액", texttemplate=None):
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=labels, y=values,
-            text=values if texttemplate else None,
-            texttemplate=texttemplate,
-            textposition="outside" if texttemplate else None,
-            hovertemplate="%{x}<br>" + y_title + ": %{y:,.0f}<extra></extra>"
-        ))
-        fig.update_layout(title=title, xaxis_title=x_title, yaxis_title=y_title, template="plotly_white", hovermode="x unified")
         return fig
 
     # ==========================================
@@ -131,7 +187,7 @@ class PlotlyVisualizer:
         return fig, table
 
     # ==========================================
-    # 3. 시간대별 매출 및 피크/최저 시간대 표시
+    # 3. 시간대별 매출 => 꺾은선 그래프 (LineChartRenderer) 적용
     # ==========================================
     def create_time_sales(self):
         time_df = self.analyzer.get_time_sales()
@@ -144,13 +200,15 @@ class PlotlyVisualizer:
         peak_idx = int(np.argmax(values))
         low_idx = int(np.argmin(values))
 
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=labels, y=values, name="시간대별 매출",
+        # 꺾은선 렌더러 사용
+        fig = self.line_renderer.render(
+            labels, values, 
+            "시간대별 매출 추이 및 피크/최저 시간대", 
+            x_title="시간대", 
+            y_title="매출 금액 (원)",
             hovertemplate="%{x}시<br>매출: %{y:,.0f}원<extra></extra>"
-        ))
+        )
 
-        # 피크(최고) 표시
         fig.add_trace(go.Scatter(
             x=[labels[peak_idx]], y=[values[peak_idx]],
             mode="markers+text", name="피크 시간대",
@@ -159,7 +217,6 @@ class PlotlyVisualizer:
             hovertemplate="피크 시간대: %{x}시<br>매출: %{y:,.0f}원<extra></extra>"
         ))
 
-        # 최저 표시
         fig.add_trace(go.Scatter(
             x=[labels[low_idx]], y=[values[low_idx]],
             mode="markers+text", name="최저 시간대",
@@ -167,16 +224,10 @@ class PlotlyVisualizer:
             marker=dict(size=14, color="blue", symbol="diamond"),
             hovertemplate="최저 시간대: %{x}시<br>매출: %{y:,.0f}원<extra></extra>"
         ))
-
-        fig.update_layout(
-            title="시간대별 매출 및 피크/최저 시간대 분석",
-            xaxis_title="시간대", yaxis_title="매출 금액 (원)",
-            template="plotly_white", hovermode="x unified"
-        )
         return fig
 
     # ==========================================
-    # 4. 성별 매출 및 비중
+    # 4. 성별 매출 => 막대 그래프 (BarChartRenderer)
     # ==========================================
     def create_gender_sales(self):
         gender_data = self.analyzer.get_gender_sales()
@@ -186,47 +237,43 @@ class PlotlyVisualizer:
         values = list(gender_data.values())
         ratios = list(ratio_data.values())
 
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=labels, y=values,
-            text=[f"{ratio:.1f}%" for ratio in ratios],
-            textposition="outside", name="성별 매출 비중",
+        fig = self.bar_renderer.render(
+            labels, values, 
+            title="거래 성별 매출 및 비중 비교", 
+            x_title="성별", 
+            y_title="매출 금액 (원)", 
+            texttemplate="%{customdata:.1f}%",
             customdata=ratios,
             hovertemplate="성별: %{x}<br>매출: %{y:,.0f}원<br>비중: %{customdata:.1f}%<extra></extra>"
-        ))
-        fig.update_layout(
-            title="거래 성별 매출 및 비중 비교",
-            xaxis_title="성별", yaxis_title="매출 금액 (원)",
-            template="plotly_white"
         )
         return fig
 
     # ==========================================
-    # 5. 주중 / 주말 매출 비교 (별도 막대)
+    # 5. 주중 / 주말 매출 => 도넛 차트 (Donut Chart) 적용
     # ==========================================
     def create_weekday_weekend_sales(self):
         ww_data = self.analyzer.get_weekday_weekend_sales()
-        total = sum(ww_data.values())
+        if not ww_data or sum(ww_data.values()) == 0:
+            return self._empty_figure("주중/주말 매출 데이터가 없습니다.")
+        
         labels = list(ww_data.keys())
         values = list(ww_data.values())
-        ratios = [value / total * 100 if total else 0 for value in values]
 
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=labels, y=values,
-            text=[f"{ratio:.1f}%" for ratio in ratios],
-            textposition="outside", customdata=ratios,
-            hovertemplate="%{x}<br>매출: %{y:,.0f}원<br>비중: %{customdata:.1f}%<extra></extra>"
-        ))
+        fig = go.Figure(data=[go.Pie(
+            labels=labels, 
+            values=values, 
+            hole=0.4,  # 도넛 차트 효과
+            textinfo="label+percent",
+            hovertemplate="%{label}<br>매출: %{y:,.0f}원<br>비중: %{percent}<extra></extra>" if hasattr(go, 'Pie') else None
+        )])
         fig.update_layout(
-            title="주중 / 주말 매출 비교",
-            xaxis_title="구분", yaxis_title="매출 금액 (원)",
+            title="주중 / 주말 매출 비중 비교",
             template="plotly_white"
         )
         return fig
 
     # ==========================================
-    # 6. 요일별(월~일) 매출 및 최고/최저 요일 편중도 표시
+    # 6. 요일별(월~일) 매출 => 레이더 차트 (Radar / Polar Chart) 적용
     # ==========================================
     def create_weekday_sales(self):
         weekday_df = self.analyzer.get_weekday_sales()
@@ -236,40 +283,32 @@ class PlotlyVisualizer:
         labels = weekday_df["구분"].tolist()
         values = weekday_df["매출금액"].tolist() if "매출금액" in weekday_df.columns else []
 
-        peak_idx = int(np.argmax(values))
-        low_idx = int(np.argmin(values))
+        # 레이더 차트 특성상 시작점과 끝점을 연결하기 위해 첫 번째 값을 마지막에 한 번 더 붙여줌
+        radar_labels = labels + [labels[0]]
+        radar_values = values + [values[0]]
 
         fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=labels, y=values, name="요일별 매출",
-            hovertemplate="%{x}요일<br>매출: %{y:,.0f}원<extra></extra>"
-        ))
-
-        # 요일 편중도 (최고 요일)
-        fig.add_trace(go.Scatter(
-            x=[labels[peak_idx]], y=[values[peak_idx]],
-            mode="markers+text", name="최고 매출 요일",
-            text=["⭐ 최고"], textposition="top center",
-            marker=dict(size=14, color="orange", symbol="star")
-        ))
-
-        # 요일 편중도 (최저 요일)
-        fig.add_trace(go.Scatter(
-            x=[labels[low_idx]], y=[values[low_idx]],
-            mode="markers+text", name="최저 매출 요일",
-            text=["📉 최저"], textposition="bottom center",
-            marker=dict(size=14, color="gray", symbol="star")
+        fig.add_trace(go.Scatterpolar(
+            r=radar_values,
+            theta=radar_labels,
+            fill='toself',
+            name='요일별 매출',
+            line=dict(color='orange', width=2),
+            hovertemplate="%{theta}<br>매출: %{r:,.0f}원<extra></extra>"
         ))
 
         fig.update_layout(
-            title="요일별(월~일) 매출 편중도 분석",
-            xaxis_title="요일", yaxis_title="매출 금액 (원)",
-            template="plotly_white"
+            title="요일별(월~일) 매출 편중도 분석 (레이더 차트)",
+            polar=dict(
+                radialaxis=dict(visible=True, range=[0, max(values) * 1.1 if values else 1])
+            ),
+            template="plotly_white",
+            showlegend=False
         )
         return fig
 
     # ==========================================
-    # 7. 연령대별 매출
+    # 7. 연령대별 매출 => 막대 그래프 (BarChartRenderer)
     # ==========================================
     def create_age_sales(self):
         age_df = self.analyzer.get_age_sales()
@@ -277,11 +316,14 @@ class PlotlyVisualizer:
             return self._empty_figure("연령대별 매출 데이터가 없습니다.")
         labels = age_df["구분"].tolist()
         values = age_df["매출금액"].tolist()
-        return self._bar_figure(labels, values, "연령대별 매출 및 소비 비중", x_title="연령대", y_title="매출 금액 (원)")
+        
+        return self.bar_renderer.render(
+            labels, values,
+            title="연령대별 매출 및 소비 비중",
+            x_title="연령대",
+            y_title="매출 금액 (원)"
+        )
 
-    # ==========================================
-    # 8. 연령대 / 성별 상호 배타 규칙 함수
-    # ==========================================
     @staticmethod
     def normalize_demographic_selection(age_group="전체", gender="전체"):
         if age_group != "전체":
