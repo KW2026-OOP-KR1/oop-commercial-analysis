@@ -27,6 +27,7 @@ TIME_COLUMNS = {
     "17~21시": "시간대_17~21_매출_금액",
     "21~24시": "시간대_21~24_매출_금액",
 }
+CHART_HEIGHT = 430
 GENDERS = [ALL, "남성", "여성"]
 AGE_GROUPS = [ALL, "10대", "20대", "30대", "40대", "50대", "60대 이상"]
 
@@ -151,6 +152,7 @@ class DashboardApp:
         st.title("서울시 상권 분석 3D 인터랙티브 대시보드")
 
         selection = SidebarFilterPanel(self.df).render()
+        st.caption(self._describe_selection(selection))
         region_df = self._apply_region_filters(selection)
         current_df = self._apply_period_filter(region_df, selection.year, selection.quarter)
 
@@ -160,7 +162,7 @@ class DashboardApp:
 
         visualizer = PlotlyVisualizer(current_df)
 
-        # 메인 화면: 3D 지도(상단, 크게) → 동향 그래프 | 막대그래프(나란히)
+        # 메인 화면: 3D 지도(상단, 크게) → 동향 그래프 | 막대그래프(나란히) → 핵심 지표
         with st.container(border=True):
             self._render_map(current_df)
 
@@ -168,24 +170,34 @@ class DashboardApp:
         with left.container(border=True):
             self._render_trend_chart(visualizer)
         with right.container(border=True):
-            self._render_bar_chart(visualizer)
+            self._render_bar_chart(visualizer, selection)
 
         self._render_metrics(current_df, region_df, selection)
         st.divider()
 
         st.subheader("상세 분석")
-        tab_market, tab_customer, tab_compare, tab_data = st.tabs(
-            ["상권 TOP 10", "고객층 분석", "기간 비교", "데이터 상세"]
-        )
+        tab_market, tab_compare, tab_data = st.tabs(["상권 TOP 10", "기간 비교", "데이터 상세"])
         with tab_market:
             self._render_top_markets(current_df)
-        with tab_customer:
-            self._render_customer_charts(current_df, visualizer, selection)
         with tab_compare:
             self._render_comparison(region_df, selection)
         with tab_data:
             st.caption(f"필터링된 데이터 {len(current_df):,}행 (상위 1,000행 표시)")
             st.dataframe(current_df.head(1000), width="stretch")
+
+    @staticmethod
+    def _describe_selection(selection: FilterSelection) -> str:
+        """현재 적용 중인 필터를 한 줄 요약으로 만든다."""
+        year = "전체 연도" if selection.year == ALL else f"{selection.year}년"
+        quarter = "전체 분기" if selection.quarter == ALL else f"{selection.quarter}분기"
+        parts = [f"{year} {quarter}"]
+        parts += [value for value in (selection.district, selection.market_type, selection.market) if value != ALL]
+        parts.append(", ".join(selection.businesses) if selection.businesses else "전체 업종")
+        if selection.gender != ALL:
+            parts.append(selection.gender)
+        if selection.age_group != ALL:
+            parts.append(selection.age_group)
+        return "📌 현재 조건: " + " · ".join(parts)
 
     # ------------------------------------------
     # 필터 적용
@@ -231,14 +243,30 @@ class DashboardApp:
                 f"{selection.year}년 {selection.quarter}분기"
             )
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("총매출", f"{current.get_total_sales():,.0f} 원",
-                    self._delta(current.get_total_sales(), base.get_total_sales() if base else None))
-        col2.metric("총매출건수", f"{current.get_total_count():,.0f} 건",
-                    self._delta(current.get_total_count(), base.get_total_count() if base else None))
-        col3.metric("평균 객단가", f"{current.get_average_spending():,.0f} 원",
-                    self._delta(current.get_average_spending(), base.get_average_spending() if base else None))
-        col4.metric("분석 대상 상권 수", f"{current_df['상권_코드'].nunique():,} 개")
+        customer = self._customer_sales(current, selection)
+        cols = st.columns(5 if customer else 4)
+        cols[0].metric("총매출", f"{current.get_total_sales():,.0f} 원",
+                       self._delta(current.get_total_sales(), base.get_total_sales() if base else None))
+        cols[1].metric("총매출건수", f"{current.get_total_count():,.0f} 건",
+                       self._delta(current.get_total_count(), base.get_total_count() if base else None))
+        cols[2].metric("평균 객단가", f"{current.get_average_spending():,.0f} 원",
+                       self._delta(current.get_average_spending(), base.get_average_spending() if base else None))
+        cols[3].metric("분석 대상 상권 수", f"{current_df['상권_코드'].nunique():,} 개")
+        if customer:
+            label, value = customer
+            total = current.get_total_sales()
+            cols[4].metric(f"{label} 매출", f"{value:,.0f} 원",
+                           f"전체 매출의 {value / total * 100:.1f}%" if total else None, delta_color="off")
+
+    @staticmethod
+    def _customer_sales(analyzer: SalesAnalyzer, selection: FilterSelection) -> tuple[str, float] | None:
+        """사이드바에서 고른 성별 또는 연령대의 매출. 선택하지 않았으면 None"""
+        if selection.gender != ALL:
+            return selection.gender, analyzer.get_gender_sales()[selection.gender]
+        if selection.age_group != ALL:
+            age_df = analyzer.get_age_sales()
+            return selection.age_group, age_df.loc[age_df["구분"] == selection.age_group, "매출금액"].sum()
+        return None
 
     @staticmethod
     def _delta(current_value: float, base_value: float | None) -> str | None:
@@ -254,28 +282,37 @@ class DashboardApp:
     # ------------------------------------------
 
     @staticmethod
-    def _render_trend_chart(visualizer: PlotlyVisualizer) -> None:
-        """동향 그래프: 요일별(월~일) 또는 시간대별 매출, 최고·최저 지점 강조"""
-        st.markdown("**📈 매출 동향**")
-        trend = st.segmented_control("기준", ["요일별", "시간대별"], default="요일별",
-                                     key="trend_type", label_visibility="collapsed") or "요일별"
-        if trend == "요일별":
-            fig = visualizer.create_weekday_sales()
-        else:
-            fig = visualizer.create_time_sales()
-        st.plotly_chart(fig, width="stretch", key="main_trend_chart")
+    def _show_chart(fig, key: str) -> None:
+        """나란히 놓인 두 차트의 높이를 맞춰서 그린다."""
+        fig.update_layout(height=CHART_HEIGHT, margin=dict(t=60, b=40, l=40, r=20))
+        st.plotly_chart(fig, width="stretch", key=key)
 
-    @staticmethod
-    def _render_bar_chart(visualizer: PlotlyVisualizer) -> None:
-        """막대그래프: 소수 항목 비교 (주중/주말, 남/녀)"""
-        st.markdown("**📊 매출 비교**")
-        compare = st.segmented_control("기준", ["주중/주말", "성별"], default="주중/주말",
-                                       key="bar_type", label_visibility="collapsed") or "주중/주말"
-        if compare == "주중/주말":
-            fig = visualizer.create_weekday_weekend_sales()
+    def _render_trend_chart(self, visualizer: PlotlyVisualizer) -> None:
+        """동향 그래프: 시간대별(꺾은선, 피크·최저 표시) 또는 요일별(월~일 레이더)"""
+        st.markdown("**📈 매출 동향**")
+        trend = st.segmented_control("기준", ["시간대별", "요일별"], default="시간대별",
+                                     key="trend_type", label_visibility="collapsed") or "시간대별"
+        if trend == "시간대별":
+            fig = visualizer.create_time_sales()
         else:
+            fig = visualizer.create_weekday_sales()
+        self._show_chart(fig, "main_trend_chart")
+
+    def _render_bar_chart(self, visualizer: PlotlyVisualizer, selection: FilterSelection) -> None:
+        """비교 그래프: 성별·연령대(막대), 주중/주말(도넛). 마우스를 올리면 수치 표시"""
+        st.markdown("**📊 매출 비교**")
+        # 사이드바에서 연령대를 골랐으면 연령대 그래프를 먼저 보여 준다.
+        options = ["성별", "연령대", "주중/주말"]
+        default = "연령대" if selection.age_group != ALL else "성별"
+        compare = st.segmented_control("기준", options, default=default,
+                                       key="bar_type", label_visibility="collapsed") or default
+        if compare == "성별":
             fig = visualizer.create_gender_sales()
-        st.plotly_chart(fig, width="stretch", key="main_bar_chart")
+        elif compare == "연령대":
+            fig = visualizer.create_age_sales()
+        else:
+            fig = visualizer.create_weekday_weekend_sales()
+        self._show_chart(fig, "main_bar_chart")
 
     @staticmethod
     def _render_top_markets(current_df: pd.DataFrame) -> None:
@@ -283,29 +320,6 @@ class DashboardApp:
         top_markets = SalesAnalyzer(current_df).get_top_markets(10)
         st.bar_chart(top_markets, x="상권_코드_명", y="당월_매출_금액",
                      x_label="상권", y_label="매출 금액 (원)", horizontal=True)
-
-    @staticmethod
-    def _render_customer_charts(current_df: pd.DataFrame, visualizer: PlotlyVisualizer,
-                                selection: FilterSelection) -> None:
-        """성별·연령대 매출. 선택한 고객층의 매출과 비중을 강조한다."""
-        analyzer = SalesAnalyzer(current_df)
-        total = analyzer.get_total_sales()
-
-        if selection.gender != ALL:
-            value = analyzer.get_gender_sales()[selection.gender]
-            st.metric(f"{selection.gender} 매출", f"{value:,.0f} 원",
-                      f"전체 매출의 {value / total * 100:.1f}%" if total else None, delta_color="off")
-        elif selection.age_group != ALL:
-            age_df = analyzer.get_age_sales()
-            value = age_df.loc[age_df["구분"] == selection.age_group, "매출금액"].sum()
-            st.metric(f"{selection.age_group} 매출", f"{value:,.0f} 원",
-                      f"전체 매출의 {value / total * 100:.1f}%" if total else None, delta_color="off")
-
-        left, right = st.columns(2)
-        with left:
-            st.plotly_chart(visualizer.create_gender_sales(), width="stretch", key="customer_gender_chart")
-        with right:
-            st.plotly_chart(visualizer.create_age_sales(), width="stretch", key="customer_age_chart")
 
     @staticmethod
     def _render_comparison(region_df: pd.DataFrame, selection: FilterSelection) -> None:

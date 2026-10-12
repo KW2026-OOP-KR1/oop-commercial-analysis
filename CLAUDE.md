@@ -1116,8 +1116,8 @@ PydeckVisualizer에서 생성한 Deck 객체를 렌더링한다.
 #### 담당 기능
 
 * 대시보드 전체 화면 구성
-  * 메인 화면 (한 화면): 3D 지도(상단, 크게) → 매출 동향 그래프 | 매출 비교 막대그래프 (나란히) → 핵심 지표 카드
-  * 상세 분석 탭: 상권 TOP 10 · 고객층 분석 · 기간 비교 · 데이터 상세
+  * 메인 화면 (한 화면): 현재 조건 요약 → 3D 지도(상단, 크게) → 매출 동향 그래프 | 매출 비교 그래프 (나란히) → 핵심 지표 카드
+  * 상세 분석 탭: 상권 TOP 10 · 기간 비교 · 데이터 상세
   * 사이드바: 기간 · 지역 · 업종 · 고객층을 테두리 박스로 구분
 * 사이드바 필터 UI 구현
 * 핵심 지표 카드 구현 (기간 비교 시 증감 표시)
@@ -1153,18 +1153,19 @@ PydeckVisualizer에서 생성한 Deck 객체를 렌더링한다.
 * `run()`: 화면 전체 구성. 데이터가 없으면 안내 메시지 표시
 * `_apply_region_filters()`: 기간을 제외한 지역·업종 필터 적용 (`DataFilter` 사용). 기간 비교 시 두 기간에 같은 조건을 쓰기 위해 기간 필터와 분리
 * `_apply_period_filter()`: 연도·분기 필터 적용
-* `_render_metrics()`: 총매출·총매출건수·평균 객단가·상권 수 카드, 기간 비교 시 증감률(%) 표시
-* `_render_trend_chart()`: 매출 동향 그래프. 요일별(월~일) / 시간대별 전환, 최고·최저 지점 강조
-* `_render_bar_chart()`: 매출 비교 막대그래프. 주중/주말 / 성별 전환
+* `_describe_selection()`: 현재 적용 중인 필터를 한 줄로 요약해 화면 상단에 표시
+* `_render_metrics()`: 총매출·총매출건수·평균 객단가·상권 수 카드, 기간 비교 시 증감률(%) 표시, 성별/연령대를 고르면 해당 고객층 매출과 비중 카드 추가
+* `_render_trend_chart()`: 매출 동향 그래프. 시간대별(꺾은선, 피크·최저 표시) / 요일별(월~일 레이더) 전환
+* `_render_bar_chart()`: 매출 비교 그래프. 성별(막대) / 연령대(막대) / 주중·주말(도넛) 전환. 사이드바에서 연령대를 고르면 연령대 그래프가 기본
+* `_show_chart()`: 나란히 놓인 두 차트의 높이를 맞춰서 그림
 * `_render_top_markets()`: 매출 상위 상권 TOP 10
-* `_render_customer_charts()`: 성별·연령대 차트, 선택한 고객층의 매출과 비중 강조
 * `_render_comparison()`: 기준 기간 대비 비교 기간 워터폴 차트와 증감 표
 * `_render_map()`: 지도 아래 요일·시간대 슬라이더(상호 배타) → 해당 매출 컬럼으로 3D 지도 높이 결정
 
 #### 다른 모듈과의 연결 (의존 인터페이스)
 
 * `filter_analyzer`: `load_data()`, `DataFilter`(`by_year`, `by_quarter`, `by_district`, `by_market_type`, `by_market`, `by_business`, `get`), `SalesAnalyzer`(`get_total_sales`, `get_total_count`, `get_average_spending`, `get_top_markets`, `get_gender_sales`, `get_age_sales`, `get_map_data`)
-* `viz_plotly`: `create_weekday_sales`, `create_weekday_weekend_sales`, `create_time_sales`, `create_gender_sales`, `create_age_sales`, `create_quarter_comparison` (`viz_plotly` 브랜치가 main에 먼저 병합되어야 함)
+* `viz_plotly`: `create_weekday_sales`, `create_weekday_weekend_sales`, `create_time_sales`, `create_gender_sales`, `create_age_sales`, `create_quarter_comparison`
 * `viz_pydeck`: `PydeckVisualizer(map_df, value_name=...).create_combined_map()` (기둥 + 가우스 산맥). `map_df`는 `SalesAnalyzer.get_map_data()` 결과이며, 선택한 요일/시간대 매출을 `당월_매출_금액` 자리에 넣어 전달하고 `value_name`(예: "토요일 매출")은 툴팁에 표시
 
 #### 원칙
