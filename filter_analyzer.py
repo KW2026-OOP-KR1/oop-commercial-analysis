@@ -822,6 +822,72 @@ class SalesAnalyzer:
 
 
     # ------------------------------------------
+    # 두 기간 매출 비교
+    # ------------------------------------------
+
+    def compare_quarters(self, base_year, base_quarter, target_year, target_quarter):
+        """
+        서로 다른 두 연도 및 분기의 매출을 비교합니다.
+
+        예:
+            analyzer.compare_quarters(2024, 1, 2025, 3)
+
+        반환값:
+            기준 및 비교 기간의 매출, 건수, 객단가,
+            각 지표의 증감액과 증감률
+        """
+
+        required = ["기준_년분기_코드", "당월_매출_금액", "당월_매출_건수"]
+
+        if any(column not in self.df.columns for column in required):
+            return None
+
+        periods = []
+
+        for year, quarter in [(base_year, base_quarter), (target_year, target_quarter)]:
+            year = int(year)
+            quarter = int(quarter)
+
+            if quarter < 1 or quarter > 4:
+                raise ValueError("분기는 1부터 4 사이여야 합니다.")
+
+            code = year * 10 + quarter
+            codes = pd.to_numeric(self.df["기준_년분기_코드"], errors="coerce")
+            period_df = self.df[codes == code]
+
+            if period_df.empty:
+                return None
+
+            analyzer = SalesAnalyzer(period_df)
+
+            periods.append({
+                "총매출": analyzer.get_total_sales(),
+                "총건수": analyzer.get_total_count(),
+                "평균객단가": analyzer.get_average_spending()
+            })
+
+        base, target = periods
+        result = []
+
+        for name in ["총매출", "총건수", "평균객단가"]:
+            before = base[name]
+            after = target[name]
+            difference = after - before
+            rate = difference / before * 100 if before != 0 else None
+
+            result.append({
+                "항목": name,
+                "기준 기간": before,
+                "비교 기간": after,
+                "증감액": difference,
+                "증감률(%)": rate
+            })
+
+        return pd.DataFrame(result)
+
+
+
+    # ------------------------------------------
     # 면적당 매출
     # ------------------------------------------
 
