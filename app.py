@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from filter_analyzer import DATA_PATH, BASE_DIR, DataFilter, SalesAnalyzer, load_data
@@ -152,17 +153,20 @@ class DashboardApp:
         st.title("서울시 상권 분석 3D 인터랙티브 대시보드")
 
         selection = SidebarFilterPanel(self.df).render()
-        st.caption(self._describe_selection(selection))
         region_df = self._apply_region_filters(selection)
         current_df = self._apply_period_filter(region_df, selection.year, selection.quarter)
 
         if current_df.empty:
+            st.caption(self._describe_selection(selection))
             st.warning("선택한 조건에 해당하는 데이터가 없습니다. 필터를 변경해 주세요.")
             return
 
         visualizer = PlotlyVisualizer(current_df)
 
-        # 메인 화면: 3D 지도(상단, 크게) → 동향 그래프 | 막대그래프(나란히) → 핵심 지표
+        # 메인 화면: 핵심 지표(제목 바로 아래) → 3D 지도(크게) → 동향 그래프 | 막대그래프(나란히)
+        self._render_metrics(current_df, region_df, selection)
+        st.caption(self._describe_selection(selection))
+
         with st.container(border=True):
             self._render_map(current_df)
 
@@ -171,8 +175,6 @@ class DashboardApp:
             self._render_trend_chart(visualizer)
         with right.container(border=True):
             self._render_bar_chart(visualizer, selection)
-
-        self._render_metrics(current_df, region_df, selection)
         st.divider()
 
         st.subheader("상세 분석")
@@ -288,18 +290,60 @@ class DashboardApp:
         st.plotly_chart(fig, width="stretch", key=key)
 
     def _render_trend_chart(self, visualizer: PlotlyVisualizer) -> None:
-        """동향 그래프: 시간대별(꺾은선, 피크·최저 표시) 또는 요일별(월~일 레이더)"""
+        """동향 그래프(꺾은선): 시간대별 또는 요일별(월~일), 최고·최저 지점 강조"""
         st.markdown("**📈 매출 동향**")
         trend = st.segmented_control("기준", ["시간대별", "요일별"], default="시간대별",
                                      key="trend_type", label_visibility="collapsed") or "시간대별"
         if trend == "시간대별":
             fig = visualizer.create_time_sales()
         else:
-            fig = visualizer.create_weekday_sales()
+            fig = self._weekday_trend_figure(visualizer)
         self._show_chart(fig, "main_trend_chart")
 
+    # 차트는 동향(꺾은선)·막대 두 종류만 쓴다. PlotlyVisualizer의 요일(레이더)·주중/주말(도넛)
+    # 차트 대신, 같은 클래스의 렌더러와 SalesAnalyzer 집계 결과로 꺾은선·막대를 그린다.
+
+    @staticmethod
+    def _weekday_trend_figure(visualizer: PlotlyVisualizer) -> go.Figure:
+        """요일별(월~일) 매출 꺾은선. 최고·최저 요일(요일 편중도)을 굵은 점으로 표시"""
+        weekday_df = visualizer.analyzer.get_weekday_sales()
+        if weekday_df.empty:
+            return go.Figure().update_layout(title="요일별 매출 데이터가 없습니다.", template="plotly_white")
+
+        labels = weekday_df["구분"].tolist()
+        values = weekday_df["매출금액"].tolist()
+        fig = visualizer.line_renderer.render(
+            labels, values, "요일별(월~일) 매출 추이 및 최고/최저 요일",
+            x_title="요일", y_title="매출 금액 (원)",
+            hovertemplate="%{x}<br>매출: %{y:,.0f}원<extra></extra>",
+        )
+        for index, name, color, position in (
+            (values.index(max(values)), "최고 요일", "red", "top center"),
+            (values.index(min(values)), "최저 요일", "blue", "bottom center"),
+        ):
+            fig.add_trace(go.Scatter(
+                x=[labels[index]], y=[values[index]], mode="markers+text", name=name,
+                text=[name], textposition=position,
+                marker=dict(size=14, color=color, symbol="diamond"),
+                hovertemplate=name + ": %{x}<br>매출: %{y:,.0f}원<extra></extra>",
+            ))
+        return fig
+
+    @staticmethod
+    def _weekday_weekend_bar_figure(visualizer: PlotlyVisualizer) -> go.Figure:
+        """주중/주말 매출 막대. 마우스를 올리면 매출액과 비중 표시"""
+        sales = visualizer.analyzer.get_weekday_weekend_sales()
+        total = sum(sales.values())
+        ratios = [value / total * 100 if total else 0 for value in sales.values()]
+        return visualizer.bar_renderer.render(
+            list(sales.keys()), list(sales.values()), "주중 / 주말 매출 및 비중 비교",
+            x_title="구분", y_title="매출 금액 (원)",
+            texttemplate="%{customdata:.1f}%", customdata=ratios,
+            hovertemplate="%{x}<br>매출: %{y:,.0f}원<br>비중: %{customdata:.1f}%<extra></extra>",
+        )
+
     def _render_bar_chart(self, visualizer: PlotlyVisualizer, selection: FilterSelection) -> None:
-        """비교 그래프: 성별·연령대(막대), 주중/주말(도넛). 마우스를 올리면 수치 표시"""
+        """비교 막대그래프: 성별 / 연령대 / 주중·주말. 마우스를 올리면 수치 표시"""
         st.markdown("**📊 매출 비교**")
         # 사이드바에서 연령대를 골랐으면 연령대 그래프를 먼저 보여 준다.
         options = ["성별", "연령대", "주중/주말"]
@@ -311,7 +355,7 @@ class DashboardApp:
         elif compare == "연령대":
             fig = visualizer.create_age_sales()
         else:
-            fig = visualizer.create_weekday_weekend_sales()
+            fig = self._weekday_weekend_bar_figure(visualizer)
         self._show_chart(fig, "main_bar_chart")
 
     @staticmethod
