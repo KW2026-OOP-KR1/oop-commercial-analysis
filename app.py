@@ -82,27 +82,36 @@ class SidebarFilterPanel:
         self._render_customer(selection)
         return selection
 
-    def _render_period(self, selection: FilterSelection) -> None:
-        st.sidebar.subheader("기간")
-        years = sorted(self.df["분석연도"].dropna().unique().tolist())
-        selection.year = st.sidebar.selectbox("연도", [ALL] + years, index=len(years))
-        selection.quarter = st.sidebar.selectbox("분기", [ALL, 1, 2, 3, 4])
+    @staticmethod
+    def _box(title: str):
+        """필터 그룹을 테두리 있는 네모 박스로 묶는다."""
+        box = st.sidebar.container(border=True)
+        box.markdown(f"**{title}**")
+        return box
 
-        selection.compare_enabled = st.sidebar.checkbox(
+    def _render_period(self, selection: FilterSelection) -> None:
+        box = self._box("📅 기간")
+        years = sorted(self.df["분석연도"].dropna().unique().tolist())
+        col1, col2 = box.columns(2)
+        selection.year = col1.selectbox("연도", [ALL] + years, index=len(years))
+        selection.quarter = col2.selectbox("분기", [ALL, 1, 2, 3, 4])
+
+        selection.compare_enabled = box.checkbox(
             "다른 기간과 비교", disabled=not selection.has_single_period(),
             help="연도와 분기를 하나씩 선택하면 사용할 수 있습니다.",
         )
         if selection.compare_enabled:
-            selection.base_year = st.sidebar.selectbox("기준 연도", years)
-            selection.base_quarter = st.sidebar.selectbox("기준 분기", [1, 2, 3, 4])
+            col1, col2 = box.columns(2)
+            selection.base_year = col1.selectbox("기준 연도", years)
+            selection.base_quarter = col2.selectbox("기준 분기", [1, 2, 3, 4])
 
     def _render_region(self, selection: FilterSelection) -> None:
-        st.sidebar.subheader("지역")
+        box = self._box("📍 지역")
         districts = sorted(self.df["자치구_코드_명"].dropna().unique().tolist())
-        selection.district = st.sidebar.selectbox("자치구", [ALL] + districts)
+        selection.district = box.selectbox("자치구", [ALL] + districts)
 
         types = sorted(self.df["상권_구분_코드_명"].dropna().unique().tolist())
-        selection.market_type = st.sidebar.selectbox("상권 유형", [ALL] + types)
+        selection.market_type = box.selectbox("상권 유형", [ALL] + types)
 
         # 상권 목록은 앞에서 고른 자치구·상권 유형에 속한 것만 보여준다.
         region_filter = DataFilter(self.df[["자치구_코드_명", "상권_구분_코드_명", "상권_코드_명"]])
@@ -111,21 +120,21 @@ class SidebarFilterPanel:
         if selection.market_type != ALL:
             region_filter.by_market_type(selection.market_type)
         markets = sorted(region_filter.get()["상권_코드_명"].dropna().unique().tolist())
-        selection.market = st.sidebar.selectbox("상권", [ALL] + markets)
+        selection.market = box.selectbox("상권", [ALL] + markets)
 
     def _render_business(self, selection: FilterSelection) -> None:
-        st.sidebar.subheader("업종")
+        box = self._box("🏪 업종")
         businesses = sorted(self.df["서비스_업종_코드_명"].dropna().unique().tolist())
-        selection.businesses = st.sidebar.multiselect("서비스 업종 (미선택 시 전체)", businesses)
+        selection.businesses = box.multiselect("서비스 업종 (미선택 시 전체)", businesses)
 
     def _render_customer(self, selection: FilterSelection) -> None:
-        st.sidebar.subheader("고객층")
-        st.sidebar.caption("성별과 연령대는 동시에 선택할 수 없습니다.")
-        selection.gender = st.sidebar.selectbox(
+        box = self._box("👥 고객층")
+        box.caption("성별과 연령대는 동시에 선택할 수 없습니다.")
+        selection.gender = box.selectbox(
             "성별", GENDERS, key="gender",
             on_change=make_exclusive, args=("gender", "age_group"),
         )
-        selection.age_group = st.sidebar.selectbox(
+        selection.age_group = box.selectbox(
             "연령대", AGE_GROUPS, key="age_group",
             on_change=make_exclusive, args=("age_group", "gender"),
         )
@@ -149,21 +158,31 @@ class DashboardApp:
             st.warning("선택한 조건에 해당하는 데이터가 없습니다. 필터를 변경해 주세요.")
             return
 
+        visualizer = PlotlyVisualizer(current_df)
+
+        # 메인 화면: 3D 지도(상단, 크게) → 동향 그래프 | 막대그래프(나란히)
+        with st.container(border=True):
+            self._render_map(current_df)
+
+        left, right = st.columns(2)
+        with left.container(border=True):
+            self._render_trend_chart(visualizer)
+        with right.container(border=True):
+            self._render_bar_chart(visualizer)
+
         self._render_metrics(current_df, region_df, selection)
         st.divider()
 
-        tab_sales, tab_customer, tab_compare, tab_map, tab_data = st.tabs(
-            ["매출 분석", "고객층 분석", "기간 비교", "3D 지도", "데이터 상세"]
+        st.subheader("상세 분석")
+        tab_market, tab_customer, tab_compare, tab_data = st.tabs(
+            ["상권 TOP 10", "고객층 분석", "기간 비교", "데이터 상세"]
         )
-        visualizer = PlotlyVisualizer(current_df)
-        with tab_sales:
-            self._render_sales_charts(current_df, visualizer)
+        with tab_market:
+            self._render_top_markets(current_df)
         with tab_customer:
             self._render_customer_charts(current_df, visualizer, selection)
         with tab_compare:
             self._render_comparison(region_df, selection)
-        with tab_map:
-            self._render_map(current_df)
         with tab_data:
             st.caption(f"필터링된 데이터 {len(current_df):,}행 (상위 1,000행 표시)")
             st.dataframe(current_df.head(1000), width="stretch")
@@ -235,19 +254,35 @@ class DashboardApp:
     # ------------------------------------------
 
     @staticmethod
-    def _render_sales_charts(current_df: pd.DataFrame, visualizer: PlotlyVisualizer) -> None:
-        """상권 TOP 10, 요일별(월~일), 주중/주말, 시간대별 매출"""
-        st.subheader("매출 상위 상권 TOP 10")
+    def _render_trend_chart(visualizer: PlotlyVisualizer) -> None:
+        """동향 그래프: 요일별(월~일) 또는 시간대별 매출, 최고·최저 지점 강조"""
+        st.markdown("**📈 매출 동향**")
+        trend = st.segmented_control("기준", ["요일별", "시간대별"], default="요일별",
+                                     key="trend_type", label_visibility="collapsed") or "요일별"
+        if trend == "요일별":
+            fig = visualizer.create_weekday_sales()
+        else:
+            fig = visualizer.create_time_sales()
+        st.plotly_chart(fig, width="stretch", key="main_trend_chart")
+
+    @staticmethod
+    def _render_bar_chart(visualizer: PlotlyVisualizer) -> None:
+        """막대그래프: 소수 항목 비교 (주중/주말, 남/녀)"""
+        st.markdown("**📊 매출 비교**")
+        compare = st.segmented_control("기준", ["주중/주말", "성별"], default="주중/주말",
+                                       key="bar_type", label_visibility="collapsed") or "주중/주말"
+        if compare == "주중/주말":
+            fig = visualizer.create_weekday_weekend_sales()
+        else:
+            fig = visualizer.create_gender_sales()
+        st.plotly_chart(fig, width="stretch", key="main_bar_chart")
+
+    @staticmethod
+    def _render_top_markets(current_df: pd.DataFrame) -> None:
+        """매출 상위 상권 TOP 10"""
         top_markets = SalesAnalyzer(current_df).get_top_markets(10)
         st.bar_chart(top_markets, x="상권_코드_명", y="당월_매출_금액",
                      x_label="상권", y_label="매출 금액 (원)", horizontal=True)
-
-        left, right = st.columns([2, 1])
-        with left:
-            st.plotly_chart(visualizer.create_weekday_sales(), width="stretch")
-        with right:
-            st.plotly_chart(visualizer.create_weekday_weekend_sales(), width="stretch")
-        st.plotly_chart(visualizer.create_time_sales(), width="stretch")
 
     @staticmethod
     def _render_customer_charts(current_df: pd.DataFrame, visualizer: PlotlyVisualizer,
@@ -268,9 +303,9 @@ class DashboardApp:
 
         left, right = st.columns(2)
         with left:
-            st.plotly_chart(visualizer.create_gender_sales(), width="stretch")
+            st.plotly_chart(visualizer.create_gender_sales(), width="stretch", key="customer_gender_chart")
         with right:
-            st.plotly_chart(visualizer.create_age_sales(), width="stretch")
+            st.plotly_chart(visualizer.create_age_sales(), width="stretch", key="customer_age_chart")
 
     @staticmethod
     def _render_comparison(region_df: pd.DataFrame, selection: FilterSelection) -> None:
@@ -281,14 +316,15 @@ class DashboardApp:
         waterfall, table = PlotlyVisualizer(region_df).create_quarter_comparison(
             selection.base_year, selection.base_quarter, selection.year, selection.quarter
         )
-        st.plotly_chart(waterfall, width="stretch")
-        st.plotly_chart(table, width="stretch")
+        st.plotly_chart(waterfall, width="stretch", key="compare_waterfall")
+        st.plotly_chart(table, width="stretch", key="compare_table")
 
     @staticmethod
     def _render_map(current_df: pd.DataFrame) -> None:
         """요일 또는 시간대를 드롭다운으로 골라 3D 지도를 그린다. 요일과 시간대는 동시에 적용하지 않는다."""
-        st.caption("요일과 시간대는 동시에 선택할 수 없습니다. 기둥 높이 단위: 억 원")
-        col1, col2 = st.columns(2)
+        title, col1, col2 = st.columns([2, 1, 1], vertical_alignment="bottom")
+        title.markdown("**🗺️ 3D 상권 매출 지도**")
+        title.caption("요일과 시간대는 동시에 선택할 수 없습니다. 기둥 높이 단위: 억 원")
         weekday = col1.selectbox(
             "요일", [ALL] + list(WEEKDAY_COLUMNS), key="map_weekday",
             on_change=make_exclusive, args=("map_weekday", "map_time"),
@@ -313,7 +349,7 @@ class DashboardApp:
             return
         # PydeckVisualizer는 '매출금액' 컬럼을 높이로 사용한다.
         map_df["매출금액"] = map_df["당월_매출_금액"] / 1e8
-        st.pydeck_chart(PydeckVisualizer(map_df).create_column_map())
+        st.pydeck_chart(PydeckVisualizer(map_df).create_column_map(), height=550)
 
 
 st.set_page_config(page_title="서울시 상권 분석 대시보드", layout="wide")
