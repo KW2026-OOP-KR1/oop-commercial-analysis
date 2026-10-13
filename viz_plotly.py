@@ -141,52 +141,40 @@ class PlotlyVisualizer:
     # 2. 연도 + 분기 비교 (워터폴 차트)
     # ==========================================
     def create_quarter_comparison(self, year_a, quarter_a, year_b, quarter_b):
-        quarter_col = "기준_년분기_코드"
-        year_col = "분석연도"
-        sales_col = "당월_매출_금액"
-        count_col = "당월_매출_건수"
+        comparison_df = self.analyzer.compare_quarters(year_a, quarter_a, year_b, quarter_b)
 
-        required = [quarter_col, sales_col, count_col]
-        if not all(col in self.df.columns for col in required):
-            return self._empty_figure("분기 비교에 필요한 컬럼이 없습니다."), go.Figure()
-
-        df = self.df.copy()
-        quarter_codes = pd.to_numeric(df[quarter_col], errors="coerce")
-
-        if year_col in df.columns:
-            years = pd.to_numeric(df[year_col], errors="coerce").fillna(quarter_codes // 10)
-        else:
-            years = quarter_codes // 10
-
-        df["_분석연도"] = years
-        df["_분석분기"] = quarter_codes % 10
-        df[sales_col] = pd.to_numeric(df[sales_col], errors="coerce").fillna(0)
-        df[count_col] = pd.to_numeric(df[count_col], errors="coerce").fillna(0)
-
-        def get_period(year, quarter):
-            period_df = df[(df["_분석연도"] == int(year)) & (df["_분석분기"] == int(quarter))]
-            if period_df.empty:
-                return None
-            sales = period_df[sales_col].sum()
-            count = period_df[count_col].sum()
-            return {
-                "총매출": sales,
-                "총건수": count,
-                "평균 객단가": sales / count if count > 0 else 0
-            }
-
-        period_a = get_period(year_a, quarter_a)
-        period_b = get_period(year_b, quarter_b)
-
-        if period_a is None or period_b is None:
+        if comparison_df is None or comparison_df.empty:
             missing = []
-            if period_a is None: missing.append(f"{year_a}년 {quarter_a}분기")
-            if period_b is None: missing.append(f"{year_b}년 {quarter_b}분기")
-            return self._empty_figure("데이터가 없는 기간: " + ", ".join(missing)), go.Figure()
+            return self._empty_figure(f"데이터가 없거나 비교에 필요한 컬럼이 없습니다 ({year_a}년 {quarter_a}분기 vs {year_b}년 {quarter_b}분기)."), go.Figure()
 
+        labels = comparison_df["항목"].tolist()  #
+        
         labels = ["총매출", "총건수", "평균 객단가"]
-        values_a = [period_a["총매출"], period_a["총건수"], period_a["평균 객단가"]]
-        values_b = [period_b["총매출"], period_b["총건수"], period_b["평균 객단가"]]
+        
+        values_a = []
+        values_b = []
+        changes = []
+
+        for _, row in comparison_df.iterrows():
+            item_name = row["항목"]
+            if item_name == "평균객단가":
+                item_name = "평균 객단가"
+                
+            a = row["기준 기간"]
+            b = row["비교 기간"]
+            diff = row["증감액"]
+            rate = row["증감률(%)"]
+            
+            values_a.append(a)
+            values_b.append(b)
+            
+            changes.append({
+                "항목": item_name, 
+                "기준 기간": a, 
+                "비교 기간": b, 
+                "증감액": diff,
+                "증감률(%)": rate
+            })
 
         fig = make_subplots(rows=1, cols=3, subplot_titles=labels, horizontal_spacing=0.1)
 
@@ -212,13 +200,7 @@ class PlotlyVisualizer:
             template="plotly_white", showlegend=False, height=500, margin=dict(t=80, b=40)
         )
 
-        changes = []
-        for label, a, b in zip(labels, values_a, values_b):
-            changes.append({
-                "항목": label, "기준 기간": a, "비교 기간": b, "증감액": b - a,
-                "증감률(%)": ((b - a) / abs(a) * 100) if a != 0 else None
-            })
-
+        # 4. 결과 테이블 생성
         table = go.Figure(data=[go.Table(
             header=dict(
                 values=["항목", "기준 기간", "비교 기간", "증감액", "증감률(%)"],
