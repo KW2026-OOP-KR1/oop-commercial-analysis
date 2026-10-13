@@ -821,6 +821,7 @@ class SalesAnalyzer:
         return result
 
 
+
     # ------------------------------------------
     # 두 기간 매출 비교
     # ------------------------------------------
@@ -829,7 +830,7 @@ class SalesAnalyzer:
         """
         서로 다른 두 연도 및 분기의 매출을 비교합니다.
 
-        예:
+        사용법:
             analyzer.compare_quarters(2024, 1, 2025, 3)
 
         반환값:
@@ -837,8 +838,9 @@ class SalesAnalyzer:
             각 지표의 증감액과 증감률
         """
 
-        required = ["기준_년분기_코드", "당월_매출_금액", "당월_매출_건수"]
+        required = ["분석연도", "기준_년분기_코드", "당월_매출_금액", "당월_매출_건수"]
 
+        # 비교 분석에 필요한 컬럼 검사
         if any(column not in self.df.columns for column in required):
             return None
 
@@ -851,13 +853,14 @@ class SalesAnalyzer:
             if quarter < 1 or quarter > 4:
                 raise ValueError("분기는 1부터 4 사이여야 합니다.")
 
-            code = year * 10 + quarter
-            codes = pd.to_numeric(self.df["기준_년분기_코드"], errors="coerce")
-            period_df = self.df[codes == code]
+            # DataFilter에 연도 및 분기 필터링을 위임
+            data_filter = DataFilter(self.df)
+            period_df = data_filter.by_year_quarter(year, quarter).get()
 
             if period_df.empty:
                 return None
 
+            # 추출된 기간의 매출 분석은 SalesAnalyzer가 담당
             analyzer = SalesAnalyzer(period_df)
 
             periods.append({
@@ -869,9 +872,11 @@ class SalesAnalyzer:
         base, target = periods
         result = []
 
+        # 두 기간의 매출 지표 비교
         for name in ["총매출", "총건수", "평균객단가"]:
             before = base[name]
             after = target[name]
+
             difference = after - before
             rate = difference / before * 100 if before != 0 else None
 
@@ -884,6 +889,7 @@ class SalesAnalyzer:
             })
 
         return pd.DataFrame(result)
+
 
 
 
