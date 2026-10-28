@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 ./output
+
+# 개인 에디터 설정 및 Code Runner 임시 파일
+.vscode/
+tempCodeRunnerFile.*

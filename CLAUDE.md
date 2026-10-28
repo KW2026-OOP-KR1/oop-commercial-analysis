@@ -1187,7 +1187,7 @@ PydeckVisualizer에서 생성한 Deck 객체를 렌더링한다.
 #### 다른 모듈과의 연결 (의존 인터페이스)
 
 * `filter_analyzer`: `load_data()`, `DataFilter`(`by_year`, `by_quarter`, `by_district`, `by_market_type`, `by_market`, `by_business`, `get`), `SalesAnalyzer`(`get_total_sales`, `get_total_count`, `get_average_spending`, `get_top_markets`, `get_weekday_sales`, `get_time_sales`, `get_age_sales`, `get_gender_sales`, `get_weekday_weekend_sales`, `get_map_data`)
-* `viz_plotly`: `PlotlyVisualizer`의 `analyzer`, `line_renderer`(`LineChartRenderer`), `bar_renderer`(`BarChartRenderer`), `create_quarter_comparison`. 레이더(`create_weekday_sales`)는 쓰지 않고, 주중/주말·남녀 도넛은 만원 단위와 툴팁을 맞추기 위해 app의 `_donut_figure()`로 그린다.
+* `viz_plotly`: `PlotlyVisualizer`의 `analyzer`, `line_renderer`(`LineChartRenderer`), `bar_renderer`(`BarChartRenderer`). 레이더(`create_weekday_sales`)는 쓰지 않고, 주중/주말·남녀 도넛은 만원 단위와 툴팁을 맞추기 위해 app의 `_donut_figure()`로 그린다. 기간 비교도 같은 이유로 `create_quarter_comparison` 대신 `SalesAnalyzer.compare_quarters()` 결과를 받아 app의 `_comparison_figure()`·`_comparison_table()`로 그린다.
 * `viz_pydeck`: `PydeckVisualizer(map_df, value_name=...).create_combined_map()` (기둥 + 가우스 산맥). `map_df`는 `SalesAnalyzer.get_map_data()` 결과이며, 선택한 항목의 매출을 `당월_매출_금액` 자리에 넣어 전달하고 `value_name`(예: "토요일 매출")은 툴팁에 표시
 
 #### 원칙

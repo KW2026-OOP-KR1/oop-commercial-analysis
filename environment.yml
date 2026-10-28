@@ -2,20 +2,8 @@ name: project_env
 channels:
   - defaults
 dependencies:
-  - bzip2=1.0.8
-  - ca-certificates=2025.7.15
-  - expat=2.7.1
-  - libffi=3.4.4
-  - openssl=3.0.17
-  - pip=26.2.1
-  - python=3.11.13
-  - setuptools=78.1.1
-  - sqlite=3.50.2
-  - tk=8.6.15
-  - tzdata=2026c
-  - wheel=0.45.1
-  - xz=5.6.4
-  - zlib=1.2.13
+  - python=3.11
+  - pip
   - pip:
       - altair==6.3.0
       - anyio==4.15.1

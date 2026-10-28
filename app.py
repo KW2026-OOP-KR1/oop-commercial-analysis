@@ -1,8 +1,10 @@
+import html
 from dataclasses import dataclass, field
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 
 from filter_analyzer import DATA_PATH, BASE_DIR, DataFilter, SalesAnalyzer, load_data
 from viz_plotly import PlotlyVisualizer
@@ -46,6 +48,25 @@ COLOR_DEFAULT = "#9DB2F5"
 COLOR_SELECTED = "#EF553B"
 DONUT_COLORS = ["#636EFA", "#EF553B"]
 MANWON = 10_000  # 화면에 보이는 매출 금액 단위: 만 원
+# TOP 10 목록 표 스타일 (라이트·다크 테마 모두에서 보이도록 반투명 회색 선 사용)
+TOP_LIST_STYLE = """
+<style>
+.top-list { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 0.85rem; }
+.top-list th { font-weight: 600; font-size: 0.75rem; opacity: 0.65; text-align: left;
+               padding: 6px 4px; border-bottom: 2px solid rgba(128, 128, 128, 0.45); }
+.top-list td { padding: 7px 4px; border-bottom: 1px solid rgba(128, 128, 128, 0.25); }
+.top-list .rank { width: 2.2em; text-align: center; font-weight: 600; }
+.top-list .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-list .value { width: 6.5em; text-align: right; font-variant-numeric: tabular-nums; }
+.top-list tbody tr:nth-child(-n+3) .rank { color: #EF553B; }
+</style>
+"""
+# 기간 비교 항목: compare_quarters()의 '항목' 값 → (화면 이름, 단위, 나눌 값)
+COMPARE_ITEMS = {
+    "총매출": ("총매출", "만원", MANWON),
+    "총건수": ("총매출건수", "건", 1),
+    "평균객단가": ("평균 객단가", "원", 1),
+}
 
 
 def format_manwon(won: float) -> str:
@@ -159,7 +180,7 @@ class SidebarFilterPanel:
         return box
 
     def _render_period(self, selection: FilterSelection) -> None:
-        box = self._box("📅 기간")
+        box = self._box("기간")
         years = sorted(self.df["분석연도"].dropna().unique().tolist())
         col1, col2 = box.columns(2)
         selection.year = col1.selectbox("연도", [ALL] + years, index=len(years))
@@ -175,7 +196,7 @@ class SidebarFilterPanel:
             selection.base_quarter = col2.selectbox("기준 분기", [1, 2, 3, 4])
 
     def _render_region(self, selection: FilterSelection) -> None:
-        box = self._box("📍 지역")
+        box = self._box("지역")
         districts = sorted(self.df["자치구_코드_명"].dropna().unique().tolist())
         selection.district = box.selectbox("자치구", [ALL] + districts)
 
@@ -192,12 +213,12 @@ class SidebarFilterPanel:
         selection.market = box.selectbox("상권", [ALL] + markets)
 
     def _render_business(self, selection: FilterSelection) -> None:
-        box = self._box("🏪 업종")
+        box = self._box("업종")
         businesses = sorted(self.df["서비스_업종_코드_명"].dropna().unique().tolist())
         selection.businesses = box.multiselect("서비스 업종 (미선택 시 전체)", businesses)
 
     def _render_customer(self, selection: FilterSelection) -> None:
-        box = self._box("👥 성별")
+        box = self._box("성별")
         box.caption("성별을 고르면 지도 아래 슬라이더가 숨겨지고 남/녀 매출 비중 도넛이 표시됩니다.")
         selection.gender = box.selectbox(
             "성별", [ALL] + list(GENDER_COLUMNS), key="gender",
@@ -255,7 +276,7 @@ class DashboardApp:
         _, item_name = selection.value_column()
         if item_name != ALL:
             parts.append(item_name)
-        return "📌 현재 조건: " + " · ".join(parts)
+        return "현재 조건: " + " · ".join(parts)
 
     # ------------------------------------------
     # 필터 적용
@@ -362,7 +383,7 @@ class DashboardApp:
     @staticmethod
     def _render_map(source: pd.DataFrame, selection: FilterSelection, value_name: str) -> None:
         """3D 지도와 그 아래 요일·시간대·연령대 슬라이더. 성별을 고르면 슬라이더는 숨긴다."""
-        st.markdown("**🗺️ 3D 상권 매출 지도**")
+        st.markdown("**3D 상권 매출 지도**")
         # 슬라이더는 지도 아래에 두지만 지도는 슬라이더 값으로 그려야 하므로 자리만 먼저 잡아 둔다.
         map_slot = st.empty()
 
@@ -389,23 +410,23 @@ class DashboardApp:
     @staticmethod
     def _render_top_list(source: pd.DataFrame, value_name: str) -> None:
         """지도 오른쪽에 작게 세로로 보이는 매출 상위 상권 TOP 10 (지도와 같은 매출 기준)"""
-        st.markdown(f"**🏆 TOP 10**  \n<small>{value_name} 기준</small>", unsafe_allow_html=True)
+        st.markdown(f"**TOP 10**  \n<small>{value_name} 기준</small>", unsafe_allow_html=True)
         top = SalesAnalyzer(source).get_top_markets(10).reset_index(drop=True)
         if top.empty:
             st.caption("데이터가 없습니다.")
             return
-        table = pd.DataFrame({
-            "순위": range(1, len(top) + 1),
-            "상권": top["상권_코드_명"],
-            "매출(만원)": (top["당월_매출_금액"] / MANWON).round(),
-        })
-        st.dataframe(
-            table, hide_index=True, width="stretch", height=MAP_HEIGHT,
-            column_config={
-                "순위": st.column_config.NumberColumn(width="small"),
-                "매출(만원)": st.column_config.NumberColumn(format="localized"),
-            },
+        # 표 높이를 고정하지 않고 결과 행 수만큼만 그리기 위해 HTML 표로 표시한다.
+        rows = "".join(
+            f"<tr><td class='rank'>{rank}</td>"
+            f"<td class='name' title='{html.escape(name)}'>{html.escape(name)}</td>"
+            f"<td class='value'>{value / MANWON:,.0f}</td></tr>"
+            for rank, (name, value) in enumerate(zip(top["상권_코드_명"], top["당월_매출_금액"]), start=1)
         )
+        st.markdown(TOP_LIST_STYLE + (
+            "<table class='top-list'><thead><tr><th class='rank'>순위</th><th>상권</th>"
+            "<th class='value'>만원</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+        ), unsafe_allow_html=True)
 
     # ------------------------------------------
     # 지도 아래 그래프 (선택 기준과 연동)
@@ -419,7 +440,7 @@ class DashboardApp:
         if selection.gender != ALL:
             _, center, _ = st.columns([1, 2, 1])
             with center.container(border=True):
-                st.markdown("**🍩 남/녀 매출 비중**")
+                st.markdown("**남/녀 매출 비중**")
                 sales = visualizer.analyzer.get_gender_sales()
                 self._show_chart(self._donut_figure(sales, "남/녀 매출 비중", selection.gender), "gender_donut")
             return
@@ -430,14 +451,14 @@ class DashboardApp:
 
         cols = st.columns(3 if show_weekend else 2)
         with cols[0].container(border=True):
-            st.markdown(f"**📈 {dimension.name}별 매출 동향**")
+            st.markdown(f"**{dimension.name}별 매출 동향**")
             self._show_chart(self._trend_figure(visualizer, summary, dimension.name, item), "main_trend_chart")
         with cols[1].container(border=True):
-            st.markdown(f"**📊 {dimension.name}별 매출 비교**")
+            st.markdown(f"**{dimension.name}별 매출 비교**")
             self._show_chart(self._bar_figure(visualizer, summary, dimension.name, item), "main_bar_chart")
         if show_weekend:
             with cols[2].container(border=True):
-                st.markdown("**🍩 주중/주말 매출 비중**")
+                st.markdown("**주중/주말 매출 비중**")
                 sales = visualizer.analyzer.get_weekday_weekend_sales()
                 self._show_chart(self._donut_figure(sales, "주중/주말 매출 비중"), "weekend_donut")
 
@@ -515,17 +536,63 @@ class DashboardApp:
     # 상세 분석
     # ------------------------------------------
 
-    @staticmethod
-    def _render_comparison(region_df: pd.DataFrame, selection: FilterSelection) -> None:
-        """기준 기간 대비 비교 기간의 지표 증감 (워터폴 차트 + 표)"""
+    def _render_comparison(self, region_df: pd.DataFrame, selection: FilterSelection) -> None:
+        """기준 기간 대비 비교 기간의 지표 증감 (워터폴 차트 + 표).
+        집계는 SalesAnalyzer.compare_quarters()가 하고, 여기서는 단위(만원·건·원)만 맞춰 그린다."""
         if not selection.compare_enabled:
             st.info("사이드바에서 연도·분기를 하나씩 선택한 뒤 '다른 기간과 비교'를 켜 주세요.")
             return
-        waterfall, table = PlotlyVisualizer(region_df).create_quarter_comparison(
+        base_label = f"{selection.base_year}년 {selection.base_quarter}분기"
+        target_label = f"{selection.year}년 {selection.quarter}분기"
+        result = SalesAnalyzer(region_df).compare_quarters(
             selection.base_year, selection.base_quarter, selection.year, selection.quarter
         )
-        st.plotly_chart(waterfall, width="stretch", key="compare_waterfall")
-        st.plotly_chart(table, width="stretch", key="compare_table")
+        if result is None or result.empty:
+            st.info(f"{base_label} 또는 {target_label}에 해당하는 데이터가 없어 비교할 수 없습니다.")
+            return
+
+        st.caption(f"기준 기간 {base_label} → 비교 기간 {target_label} "
+                   "(자치구·상권·업종 조건은 두 기간에 똑같이 적용)")
+        st.plotly_chart(self._comparison_figure(result, base_label, target_label),
+                        width="stretch", key="compare_waterfall")
+        st.dataframe(self._comparison_table(result), hide_index=True, width="stretch")
+
+    @staticmethod
+    def _comparison_figure(result: pd.DataFrame, base_label: str, target_label: str) -> go.Figure:
+        """지표별 워터폴(기준 → 증감 → 비교). 총매출은 만원, 건수는 건, 객단가는 원"""
+        names = [COMPARE_ITEMS[item] for item in result["항목"]]
+        fig = make_subplots(rows=1, cols=len(result), horizontal_spacing=0.08,
+                            subplot_titles=[f"{label} ({unit})" for label, unit, _ in names])
+        for col, ((_, row), (label, unit, divisor)) in enumerate(zip(result.iterrows(), names), start=1):
+            fig.add_trace(go.Waterfall(
+                name=label, orientation="v", measure=["absolute", "relative", "total"],
+                x=[base_label, "증감", target_label],
+                y=[row["기준 기간"] / divisor, row["증감액"] / divisor, row["비교 기간"] / divisor],
+                texttemplate="%{y:,.0f}", textposition="outside",
+                hovertemplate=f"%{{x}}<br>%{{y:,.0f}} {unit}<extra></extra>",
+                connector={"line": {"color": "rgb(63, 63, 63)"}},
+                increasing={"marker": {"color": "#EF553B"}},
+                decreasing={"marker": {"color": "#636EFA"}},
+            ), row=1, col=col)
+        fig.update_layout(title=f"{base_label} 대비 {target_label} 지표별 증감",
+                          template="plotly_white", showlegend=False, height=480, margin=dict(t=90, b=40))
+        return fig
+
+    @staticmethod
+    def _comparison_table(result: pd.DataFrame) -> pd.DataFrame:
+        """증감 표 (화면 표시용 문자열). 기준값이 0이면 증감률 대신 안내 문구"""
+        rows = []
+        for _, row in result.iterrows():
+            label, unit, divisor = COMPARE_ITEMS[row["항목"]]
+            rate = row["증감률(%)"]
+            rows.append({
+                "항목": label,
+                "기준 기간": f"{row['기준 기간'] / divisor:,.0f} {unit}",
+                "비교 기간": f"{row['비교 기간'] / divisor:,.0f} {unit}",
+                "증감액": f"{row['증감액'] / divisor:+,.0f} {unit}",
+                "증감률": "기준값 0 (계산 불가)" if rate is None or pd.isna(rate) else f"{rate:+.1f}%",
+            })
+        return pd.DataFrame(rows)
 
 
 st.set_page_config(page_title="서울시 상권 분석 대시보드", layout="wide")
