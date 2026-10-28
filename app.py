@@ -44,6 +44,7 @@ GENDER_COLUMNS = {
 }
 CHART_HEIGHT = 430
 MAP_HEIGHT = 550
+MAP_START_PITCH_LIMIT = 60  # 바탕 지도(MapLibre)가 처음부터 그려지는 최대 시작 기울기
 COLOR_DEFAULT = "#9DB2F5"
 COLOR_SELECTED = "#EF553B"
 DONUT_COLORS = ["#636EFA", "#EF553B"]
@@ -413,6 +414,9 @@ class DashboardApp:
             map_slot.info("지도에 표시할 위치 데이터가 없습니다.")
             return
         deck = PydeckVisualizer(map_df, value_name=value_name).create_combined_map()
+        # 처음 기울기가 60°를 넘으면 Streamlit에서 바탕 지도가 그려지지 않아(확대·축소를 해야 보임) 시작 기울기만 낮춘다.
+        # 마우스로 더 기울이는 것(max_pitch)은 그대로 허용한다.
+        deck.initial_view_state.pitch = min(deck.initial_view_state.pitch, MAP_START_PITCH_LIMIT)
         map_slot.pydeck_chart(deck, height=MAP_HEIGHT)
 
     @staticmethod
