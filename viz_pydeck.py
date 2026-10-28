@@ -123,7 +123,10 @@ class SalesColumnLayer(MapLayer):
             "height": ratio * self.MAX_HEIGHT_M,
             "color": self._blend_color(ratio, self.COLOR_LOW, self.COLOR_HIGH, 220),
             "tooltip_title": self.df[self.COL_NAME],
-            "tooltip_body": self._tooltip_body(),
+            "tooltip_area": self._tooltip_area(),
+            "tooltip_value": [
+                f"{self.value_name}: {self.format_won(value)}" for value in self.df[self.value_col]
+            ],
         })
         return pdk.Layer(
             "ColumnLayer",
@@ -137,16 +140,14 @@ class SalesColumnLayer(MapLayer):
             auto_highlight=True,
         )
 
-    def _tooltip_body(self) -> list[str]:
-        """'자치구 · 상권구분<br/>매출: 12.3억 원' 형태 (없는 컬럼은 생략)"""
-        bodies = []
-        for _, row in self.df.iterrows():
-            area = " · ".join(
-                str(row[col]) for col in (self.COL_GU, self.COL_KIND) if col in self.df.columns
-            )
-            value_line = f"{self.value_name}: <b>{self.format_won(row[self.value_col])}</b>"
-            bodies.append(f"{area}<br/>{value_line}" if area else value_line)
-        return bodies
+    def _tooltip_area(self) -> list[str]:
+        """'자치구 · 상권구분' 형태 (없는 컬럼은 생략)
+
+        Streamlit은 tooltip 값 안의 HTML 태그를 글자 그대로 보여 주므로
+        값에는 태그를 넣지 않고, 굵게·줄바꿈은 PydeckVisualizer.TOOLTIP 틀에서 처리한다.
+        """
+        columns = [col for col in (self.COL_GU, self.COL_KIND) if col in self.df.columns]
+        return [" · ".join(str(row[col]) for col in columns) for _, row in self.df.iterrows()]
 
 
 class GaussianSurfaceLayer(MapLayer):
@@ -303,7 +304,8 @@ class PydeckVisualizer:
     }
 
     TOOLTIP = {
-        "html": "<b>{tooltip_title}</b><br/>{tooltip_body}",
+        # 자치구·상권구분(tooltip_area)은 없을 수 있어 빈 줄이 생기지 않도록 마지막 줄에 둔다.
+        "html": "<b>{tooltip_title}</b><br/><b>{tooltip_value}</b><br/>{tooltip_area}",
         "style": {"backgroundColor": "rgba(30, 30, 30, 0.9)", "color": "white", "fontSize": "13px"},
     }
 
