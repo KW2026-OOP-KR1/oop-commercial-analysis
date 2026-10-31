@@ -249,7 +249,7 @@ class PlotlyVisualizer:
     # 주중 / 주말 매출 => 도넛 렌더러 적용
     # ==========================================
     def create_weekday_sales_trend(self):
-        """월~일 요일별 매출 흐름 및 동향을 꺾은선 그래프로 시각화합니다."""
+        """월~일 요일별 매출 비중을 도넛 차트로 시각화합니다."""
         weekday_df = self.analyzer.get_weekday_sales()
         if weekday_df.empty:
             return self._empty_figure("요일별 매출 데이터가 없습니다.")
@@ -257,12 +257,10 @@ class PlotlyVisualizer:
         labels = weekday_df["구분"].tolist()
         values = weekday_df["매출금액"].map(UnitFormatter.to_manwon).tolist() if "매출금액" in weekday_df.columns else []
 
-        return self.line_renderer.render(
+        return self.donut_renderer.render(
             labels, values,
-            title="요일별 매출 동향",
-            x_title="요일",
-            y_title="매출 금액 (만 원)",
-            hovertemplate="%{x}<br>매출: %{y:,.0f}만원<extra></extra>"
+            title="요일별 매출 비중 비교",
+            hovertemplate="%{label}<br>매출: %{value:,.0f}만원<br>비중: %{percent}<extra></extra>"
         )
 
     # ==========================================
@@ -288,6 +286,25 @@ class PlotlyVisualizer:
             texttemplate="%{customdata:.1f}%", 
             customdata=ratios,
             hovertemplate="%{x}<br>매출: %{y:,.0f}만원<br>비중: %{customdata:.1f}%<extra></extra>"
+        )
+
+
+    # ==========================================
+    # 성별 매출 => 도넛 렌더러 적용
+    # ==========================================
+    def create_gender_sales(self):
+        gender_data = self.analyzer.get_gender_sales()
+        if not gender_data or sum(gender_data.values()) == 0:
+            return self._empty_figure("성별 매출 데이터가 없습니다.")
+
+        labels = list(gender_data.keys())
+        # 원(won) 단위를 만 원 단위로 변환
+        values = [UnitFormatter.to_manwon(v) for v in gender_data.values()]
+
+        return self.donut_renderer.render(
+            labels, values,
+            title="거래 성별 매출 비중 비교",
+            hovertemplate="%{label}<br>매출: %{value:,.0f}만원<br>비중: %{percent}<extra></extra>"
         )
 
 
