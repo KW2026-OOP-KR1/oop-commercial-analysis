@@ -421,21 +421,23 @@ class SalesAnalyzer:
         return result
 
     # ------------------------------------------
-    # 두 기간 매출 비교
+    # 두 기간 비교
     # ------------------------------------------
 
     def compare_quarters(
-        self,
-        base_year,
-        base_quarter,
-        target_year,
-        target_quarter
+            self,
+            base_year,
+            base_quarter,
+            target_year,
+            target_quarter
     ):
         required = [
             "분석연도",
-            "기준_년분기_코드",
+            "분기",
             "당월_매출_금액",
-            "당월_매출_건수"
+            "당월_매출_건수",
+            "주중_매출_금액",
+            "주말_매출_금액"
         ]
 
         if any(column not in self.df.columns for column in required):
@@ -453,10 +455,8 @@ class SalesAnalyzer:
             if quarter < 1 or quarter > 4:
                 raise ValueError("분기는 1부터 4 사이여야 합니다.")
 
-            data_filter = DataFilter(self.df)
-
             period_df = (
-                data_filter
+                DataFilter(self.df)
                 .by_year_quarter(year, quarter)
                 .get()
             )
@@ -465,17 +465,26 @@ class SalesAnalyzer:
                 return None
 
             analyzer = SalesAnalyzer(period_df)
+            weekday_weekend = analyzer.get_weekday_weekend_sales()
 
             periods.append({
                 "총매출": analyzer.get_total_sales(),
                 "총건수": analyzer.get_total_count(),
-                "평균객단가": analyzer.get_average_spending()
+                "평균객단가": analyzer.get_average_spending(),
+                "주중매출": weekday_weekend["주중"],
+                "주말매출": weekday_weekend["주말"]
             })
 
         base, target = periods
         result = []
 
-        for name in ["총매출", "총건수", "평균객단가"]:
+        for name in [
+            "총매출",
+            "총건수",
+            "평균객단가",
+            "주중매출",
+            "주말매출"
+        ]:
             before = base[name]
             after = target[name]
 
