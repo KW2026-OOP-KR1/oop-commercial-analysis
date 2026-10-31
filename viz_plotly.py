@@ -6,9 +6,19 @@ from plotly.subplots import make_subplots
 
 from filter_analyzer import SalesAnalyzer, DataFilter
 
+class UnitFormatter:
+    """단위 변환 및 포맷팅을 전담하는 유틸리티 클래스"""
+    
+    @staticmethod
+    def to_manwon(val):
+        """원(won) 단위의 금액을 만원 단위로 변환합니다."""
+        try:
+            return float(val) / 10000
+        except (TypeError, ValueError):
+            return 0.0
 
 # ==========================================
-# 1. 렌더러 추상 클래스 
+# 렌더러 추상 클래스 
 # ==========================================
 class ChartRenderer(ABC):
     @abstractmethod
@@ -17,7 +27,7 @@ class ChartRenderer(ABC):
 
 
 # ==========================================
-# 2. 구체적인 렌더러 클래스들 
+# 구체적인 렌더러 클래스들 
 # ==========================================
 class BarChartRenderer(ChartRenderer):
     """막대 그래프 전담 렌더러"""
@@ -168,7 +178,7 @@ class WaterfallChartRenderer(ChartRenderer):
 
 
 # ==========================================
-# 3. 시각화 메인 클래스
+# 시각화 메인 클래스
 # ==========================================
 class PlotlyVisualizer:
 
@@ -185,7 +195,7 @@ class PlotlyVisualizer:
         return fig
 
     # ==========================================
-    # 2. 연도 + 분기 비교 (워터폴 차트)
+    # 연도 + 분기 비교 (워터폴 차트)
     # ==========================================
     def create_quarter_comparison(self, year_a, quarter_a, year_b, quarter_b):
         # 1. 데이터 가져오기
@@ -196,7 +206,7 @@ class PlotlyVisualizer:
         return renderer.render(comparison_df, year_a, quarter_a, year_b, quarter_b)
 
     # ==========================================
-    # 3. 시간대별 매출 => 꺾은선 렌더러 적용
+    # 시간대별 매출 => 꺾은선 렌더러 적용
     # ==========================================
     def create_time_sales(self):
         time_df = self.analyzer.get_time_sales()
@@ -234,48 +244,32 @@ class PlotlyVisualizer:
         ))
         return fig
 
-    # ==========================================
-    # 4. 성별 매출 => 막대 렌더러 적용
-    # ==========================================
-    def create_gender_sales(self):
-        gender_data = self.analyzer.get_gender_sales()
-        ratio_data = self.analyzer.get_gender_ratio()
-
-        labels = list(gender_data.keys())
-        values = list(gender_data.values())
-        ratios = list(ratio_data.values())
-
-        fig = self.bar_renderer.render(
-            labels, values, 
-            title="거래 성별 매출 및 비중 비교", 
-            x_title="성별", 
-            y_title="매출 금액 (원)", 
-            texttemplate="%{customdata:.1f}%",
-            customdata=ratios,
-            hovertemplate="성별: %{x}<br>매출: %{y:,.0f}원<br>비중: %{customdata:.1f}%<extra></extra>"
-        )
-        return fig
 
     # ==========================================
-    # 5. 주중 / 주말 매출 => 도넛 렌더러 적용
+    # 주중 / 주말 매출 => 도넛 렌더러 적용
     # ==========================================
-    def create_weekday_weekend_sales(self):
-        ww_data = self.analyzer.get_weekday_weekend_sales()
-        if not ww_data or sum(ww_data.values()) == 0:
-            return self._empty_figure("주중/주말 매출 데이터가 없습니다.")
-        
-        labels = list(ww_data.keys())
-        values = list(ww_data.values())
+    def create_weekday_sales_trend(self):
+        """월~일 요일별 매출 흐름 및 동향을 꺾은선 그래프로 시각화합니다."""
+        weekday_df = self.analyzer.get_weekday_sales()
+        if weekday_df.empty:
+            return self._empty_figure("요일별 매출 데이터가 없습니다.")
 
-        return self.donut_renderer.render(
+        labels = weekday_df["구분"].tolist()
+        values = weekday_df["매출금액"].map(UnitFormatter.to_manwon).tolist() if "매출금액" in weekday_df.columns else []
+
+        return self.line_renderer.render(
             labels, values,
-            title="주중 / 주말 매출 비중 비교"
+            title="요일별 매출 동향",
+            x_title="요일",
+            y_title="매출 금액 (만 원)",
+            hovertemplate="%{x}<br>매출: %{y:,.0f}만원<extra></extra>"
         )
 
     # ==========================================
-    # 6. 요일별(월~일) 매출 => 레이더 렌더러 적용
+    # 요일별(월~일) 매출 => 막대 그래프
     # ==========================================
-    def create_weekday_sales(self):
+    def create_weekday_sales_comparison(self):
+        """요일별 매출 크기 및 비중을 막대 그래프로 비교합니다."""
         weekday_df = self.analyzer.get_weekday_sales()
         if weekday_df.empty:
             return self._empty_figure("요일별 매출 데이터가 없습니다.")
@@ -288,7 +282,7 @@ class PlotlyVisualizer:
 
         return self.bar_renderer.render(
             labels, values,
-            title="요일별(월~일) 매출 편중도 분석",
+            title="요일별 매출 비교",
             x_title="요일",
             y_title="매출 금액 (만 원)",
             texttemplate="%{customdata:.1f}%", 
@@ -296,22 +290,6 @@ class PlotlyVisualizer:
             hovertemplate="%{x}<br>매출: %{y:,.0f}만원<br>비중: %{customdata:.1f}%<extra></extra>"
         )
 
-    # ==========================================
-    # 7. 연령대별 매출 => 막대 렌더러 적용
-    # ==========================================
-    def create_age_sales(self):
-        age_df = self.analyzer.get_age_sales()
-        if age_df.empty:
-            return self._empty_figure("연령대별 매출 데이터가 없습니다.")
-        labels = age_df["구분"].tolist()
-        values = age_df["매출금액"].tolist()
-        
-        return self.bar_renderer.render(
-            labels, values,
-            title="연령대별 매출 및 소비 비중",
-            x_title="연령대",
-            y_title="매출 금액 (원)"
-        )
 
     @staticmethod
     def normalize_demographic_selection(age_group="전체", gender="전체"):
