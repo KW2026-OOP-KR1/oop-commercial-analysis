@@ -8,9 +8,10 @@ import pydeck as pdk
 from PIL import Image
 
 
-class MapLayer(ABC):
-    """지도 레이어 공통 부모 클래스
 
+# 지도 레이어 공통 부모 클래스
+class MapLayer(ABC):
+    """
     입력 df는 상권 단위로 집계된 지도용 데이터 (SalesAnalyzer.get_map_data() 결과)이다.
     필수 컬럼 검증, 유효하지 않은 좌표 제외, 높이 스케일 계산을 공통으로 처리한다.
     """
@@ -99,8 +100,8 @@ class MapLayer(ABC):
         """Pydeck 레이어 생성 (자식 클래스에서 구현)"""
 
 
+# 상권별 매출 3D 기둥 레이어 (실제 관측값)
 class SalesColumnLayer(MapLayer):
-    """상권별 매출 3D 기둥 레이어 (실제 관측값)"""
 
     COL_GU = "자치구_코드_명"           # 있으면 tooltip에 표시
     COL_KIND = "상권_구분_코드_명"      # 있으면 tooltip에 표시
@@ -150,9 +151,9 @@ class SalesColumnLayer(MapLayer):
         return [" · ".join(str(row[col]) for col in columns) for _, row in self.df.iterrows()]
 
 
+# 지역 매출 집중도를 나타내는 가우스 산맥 레이어 (보간된 추정값)
 class GaussianSurfaceLayer(MapLayer):
-    """지역 매출 집중도를 나타내는 가우스 산맥 레이어 (보간된 추정값)
-
+    """
     각 상권 위치에 매출만큼의 가우스 언덕을 놓고 모두 더한 값을 격자로 계산한다.
     상권 사이의 값은 실제 관측값이 아니라 계산으로 채운 추정값이다.
     격자를 높이 이미지(elevation_data)와 색 이미지(texture)로 만들어
@@ -271,6 +272,11 @@ class GaussianSurfaceLayer(MapLayer):
         return self._to_png_data_uri(pixels)
 
     def build(self) -> pdk.Layer:
+        # 검증 후 남은 상권이 없으면 곡면을 그리지 않는 빈 레이어를 돌려준다.
+        # (SalesColumnLayer가 빈 데이터에서 빈 레이어를 돌려주는 것과 동작을 맞춤)
+        if self.df.empty:
+            return pdk.Layer("TerrainLayer", pickable=False)
+
         density, bounds = self._density_matrix()
         ratio = self._scale_ratio(density)
         ratio = np.where(ratio >= self.MIN_RATIO, ratio, 0)
@@ -289,8 +295,8 @@ class GaussianSurfaceLayer(MapLayer):
         )
 
 
+# 서울 상권 3D 지도 생성 클래스 (기둥·가우스 산맥 레이어를 조합)
 class PydeckVisualizer:
-    """서울 상권 3D 지도 생성 클래스 (기둥·가우스 산맥 레이어를 조합)"""
 
     SCALES = MapLayer.SCALES
     SEOUL_CENTER = (37.5665, 126.9780)  # (위도, 경도)
@@ -326,19 +332,15 @@ class PydeckVisualizer:
         self.scale = scale
         self.view_mode = view_mode
 
+    # 상권별 3D 기둥 지도
     def create_column_map(self) -> pdk.Deck:
-        """상권별 3D 기둥 지도"""
         return self._make_deck([self._column_layer])
-
+    
+    # 가우스 매출 산맥 지도
     def create_gaussian_map(self) -> pdk.Deck:
-        """가우스 매출 산맥 지도"""
         return self._make_deck([self._gaussian_layer])
 
     def create_combined_map(self) -> pdk.Deck:
-        """가우스 산맥과 상권 기둥을 겹친 지도
-
-        반투명 산맥 안쪽의 기둥이 비쳐 보이도록 기둥을 먼저 그리고 산맥을 나중에 그린다.
-        """
         return self._make_deck([self._column_layer, self._gaussian_layer])
 
     def _column_layer(self) -> MapLayer:
@@ -348,7 +350,7 @@ class PydeckVisualizer:
         return GaussianSurfaceLayer(self.df, self.value_col, self.scale)
 
     def _make_deck(self, layer_factories: list) -> pdk.Deck:
-        """레이어들을 만들어 하나의 Deck으로 조립 (데이터가 없으면 빈 서울 지도)"""
+
         view_state = pdk.ViewState(
             latitude=self.SEOUL_CENTER[0],
             longitude=self.SEOUL_CENTER[1],
