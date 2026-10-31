@@ -117,18 +117,30 @@ class WaterfallChartRenderer(ChartRenderer):
             if item_name == "평균객단가":
                 item_name = "평균 객단가"
                 
-            # 원(won) 단위를 만 원 단위로 변환 적용
-            a = UnitFormatter.to_manwon(row["기준 기간"])
-            b = UnitFormatter.to_manwon(row["비교 기간"])
-            diff = UnitFormatter.to_manwon(row["증감액"])
+            raw_a = row["기준 기간"]
+            raw_b = row["비교 기간"]
+            raw_diff = row["증감액"]
             rate = row["증감률(%)"]
+            
+            # '매출'이 포함된 금액성 지표에만 만 원 단위 변환 적용 (건수, 객단가는 원본 유지)
+            if "매출" in item_name:
+                a = UnitFormatter.to_manwon(raw_a)
+                b = UnitFormatter.to_manwon(raw_b)
+                diff = UnitFormatter.to_manwon(raw_diff)
+                unit_label = "만"
+            else:
+                a = raw_a
+                b = raw_b
+                diff = raw_diff
+                unit_label = "원" if "객단가" in item_name else "건"
             
             changes.append({
                 "항목": item_name, 
                 "기준 기간": a, 
                 "비교 기간": b, 
                 "증감액": diff,
-                "증감률(%)": rate
+                "증감률(%)": rate,
+                "단위": unit_label
             })
 
         # 데이터 개수(len(changes))에 맞춰 서브플롯 열(cols)과 제목을 동적으로 생성합니다.
@@ -142,6 +154,7 @@ class WaterfallChartRenderer(ChartRenderer):
             b = change["비교 기간"]
             diff = change["증감액"]
             label = change["항목"]
+            unit = change["단위"]
             
             fig.add_trace(
                 go.Waterfall(
@@ -149,7 +162,7 @@ class WaterfallChartRenderer(ChartRenderer):
                     measure=["absolute", "relative", "total"],
                     x=[f"{year_a}년 {quarter_a}분기", "증감", f"{year_b}년 {quarter_b}분기"],
                     y=[a, diff, b],
-                    texttemplate="%{y:,.0f}만", textposition="outside", # 단위 만원 명시
+                    texttemplate=f"%{{y:,.0f}}{unit}", textposition="outside",
                     connector={"line": {"color": "rgb(63, 63, 63)"}},
                     increasing={"marker": {"color": "#EF553B"}},
                     decreasing={"marker": {"color": "#636EFA"}}
@@ -157,30 +170,40 @@ class WaterfallChartRenderer(ChartRenderer):
                 row=1, col=i
             )
 
-        # 차트 너비 및 레이아웃 설정 (단위를 '만 원'으로 명시)
+        # 차트 레이아웃 설정
         fig.update_layout(
-            title=f"<b>{year_a}년 {quarter_a}분기 vs {year_b}년 {quarter_b}분기 지표별 증감 비교 (단위: 만 원)</b>",
+            title=f"<b>{year_a}년 {quarter_a}분기 vs {year_b}년 {quarter_b}분기 지표별 증감 비교</b>",
             template="plotly_white", showlegend=False, height=500, margin=dict(t=80, b=40)
         )
 
-        # 결과 테이블 생성 부분 (금액 및 증감액 컬럼 표시 통일)
+        # 결과 테이블 생성 부분 (각 지표의 성격에 맞는 포맷 적용)
+        table_基準 = []
+        table_比較 = []
+        table_증감 = []
+        
+        for row in changes:
+            u = row["단위"]
+            table_基準.append(f'{row["기준 기간"]:,.0f}{u}')
+            table_比較.append(f'{row["비교 기간"]:,.0f}{u}')
+            table_증감.append(f'{row["증감액"]:+,.0f}{u}')
+
         table = go.Figure(data=[go.Table(
             header=dict(
-                values=["항목", "기준 기간(만)", "비교 기간(만)", "증감액(만)", "증감률(%)"],
+                values=["항목", "기준 기간", "비교 기간", "증감액", "증감률(%)"],
                 fill_color="#2b313e", font=dict(color="white", size=13), align="center", height=35
             ),
             cells=dict(
                 values=[
                     [row["항목"] for row in changes],
-                    [f'{row["기준 기간"]:,.0f}' for row in changes],
-                    [f'{row["비교 기간"]:,.0f}' for row in changes],
-                    [f'{row["증감액"]:+,.0f}' for row in changes],
+                    table_基準,
+                    table_比較,
+                    table_증감,
                     [f'{row["증감률(%)"]:+.2f}%' if row["증감률(%)"] is not None else "기준값 0" for row in changes]
                 ],
                 fill_color="#1e222b", font=dict(color="white", size=12), align="center", height=30
             )
         )])
-        table.update_layout(title="분기별 증감 상세 분석 (단위: 만 원)", template="plotly_white", height=220, margin=dict(t=40, b=10))
+        table.update_layout(title="분기별 증감 상세 분석", template="plotly_white", height=220, margin=dict(t=40, b=10))
 
         return fig, table
 
