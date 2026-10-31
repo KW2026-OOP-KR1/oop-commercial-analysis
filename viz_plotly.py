@@ -6,6 +6,17 @@ from plotly.subplots import make_subplots
 
 from filter_analyzer import SalesAnalyzer, DataFilter
 
+class UnitFormatter:
+    """단위 변환 및 포맷팅을 전담하는 유틸리티 클래스"""
+    
+    @staticmethod
+    def to_manwon(val):
+        """원(won) 단위의 금액을 만원 단위로 변환합니다."""
+        try:
+            return float(val) / 10000
+        except (TypeError, ValueError):
+            return 0.0
+
 # ==========================================
 # 렌더러 추상 클래스 
 # ==========================================
