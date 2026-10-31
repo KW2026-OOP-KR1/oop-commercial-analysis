@@ -177,15 +177,15 @@ class WaterfallChartRenderer(ChartRenderer):
         )
 
         # 결과 테이블 생성 부분 (각 지표의 성격에 맞는 포맷 적용)
-        table_基準 = []
-        table_比較 = []
-        table_증감 = []
+        table_base = []
+        table_compare = []
+        table_diff = []
         
         for row in changes:
             u = row["단위"]
-            table_基準.append(f'{row["기준 기간"]:,.0f}{u}')
-            table_比較.append(f'{row["비교 기간"]:,.0f}{u}')
-            table_증감.append(f'{row["증감액"]:+,.0f}{u}')
+            table_base.append(f'{row["기준 기간"]:,.0f}{u}')
+            table_compare.append(f'{row["비교 기간"]:,.0f}{u}')
+            table_diff.append(f'{row["증감액"]:+,.0f}{u}')
 
         table = go.Figure(data=[go.Table(
             header=dict(
@@ -195,9 +195,9 @@ class WaterfallChartRenderer(ChartRenderer):
             cells=dict(
                 values=[
                     [row["항목"] for row in changes],
-                    table_基準,
-                    table_比較,
-                    table_증감,
+                    table_base,
+                    table_compare,
+                    table_diff,
                     [f'{row["증감률(%)"]:+.2f}%' if row["증감률(%)"] is not None else "기준값 0" for row in changes]
                 ],
                 fill_color="#1e222b", font=dict(color="white", size=12), align="center", height=30
