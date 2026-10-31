@@ -34,20 +34,59 @@ class UnitFormatter:
 
 
 class DashboardDataLoader(DataLoader):
-    """DataLoader를 상속해, 통합 CSV가 없으면 연도별 전처리 CSV를 합쳐서 불러오는 클래스"""
+    """DataLoader를 상속해, 전처리 결과가 없거나 오래됐으면 전처리를 먼저 실행한 뒤 불러오는 클래스.
+    통합 CSV가 있으면 그것을, 없으면 연도별 전처리 CSV를 합쳐서 사용한다."""
     YEARS = (2023, 2024, 2025)
+    # 대시보드에 꼭 필요한 컬럼. 하나라도 없으면 예전 전처리 결과로 보고 전처리를 다시 실행한다.
+    REQUIRED_COLUMNS = (
+        "분석연도", "분기", "상권_코드", "상권_코드_명", "상권_구분_코드_명", "자치구_코드_명",
+        "서비스_업종_코드_명", "당월_매출_금액", "당월_매출_건수", "경도", "위도",
+    )
 
     def load_dashboard_data(self) -> pd.DataFrame:
-        """통합 CSV(DataLoader 기본 경로)가 있으면 사용하고, 없으면 output/processed_연도.csv를 합친다."""
+        """필요하면 전처리를 실행하고, 전처리 결과 CSV를 불러온다."""
+        if self.needs_preprocessing():
+            self.run_preprocessing()
         if self.file_path.exists():
             return self.load_data()
-        return pd.concat(
-            [self.load_data(self.make_path(f"processed_{year}.csv")) for year in self.YEARS],
-            ignore_index=True,
+        return pd.concat([self.load_data(path) for path in self._source_files()], ignore_index=True)
+
+    def needs_preprocessing(self) -> bool:
+        """불러올 전처리 파일이 없거나 필수 컬럼이 빠져 있으면 True"""
+        return any(
+            not path.exists() or not set(self.REQUIRED_COLUMNS) <= set(self._read_header(path))
+            for path in self._source_files()
         )
 
     @staticmethod
-    @st.cache_data(show_spinner="데이터를 불러오는 중...")
+    def run_preprocessing() -> None:
+        """data_processing.py의 전처리를 실행한다. (원본 data/ → 결과 output/, 원본은 수정하지 않음)"""
+        try:
+            import data_processing  # 전처리가 필요할 때만 불러온다 (좌표 변환용 pyproj 필요)
+        except ModuleNotFoundError as error:
+            raise RuntimeError(
+                f"전처리에 필요한 라이브러리가 없습니다: {error.name}. "
+                "environment.yml로 환경을 다시 설치해 주세요."
+            ) from error
+        data_processing.main()
+
+    def _source_files(self) -> list:
+        """실제로 불러올 파일 목록: 통합 CSV가 있으면 그것 하나, 없으면 연도별 CSV"""
+        if self.file_path.exists():
+            return [self.file_path]
+        return [self.make_path(f"processed_{year}.csv") for year in self.YEARS]
+
+    def _read_header(self, path) -> list[str]:
+        """CSV의 컬럼 이름만 읽는다 (데이터 행은 읽지 않음)."""
+        for encoding in self.encodings:
+            try:
+                return pd.read_csv(path, nrows=0, encoding=encoding).columns.tolist()
+            except UnicodeDecodeError:
+                continue
+        return []
+
+    @staticmethod
+    @st.cache_data(show_spinner="데이터를 확인하고 불러오는 중... (처음 실행 시 전처리로 1분 정도 걸릴 수 있습니다)")
     def load() -> pd.DataFrame:
         """Streamlit 재실행마다 CSV를 다시 읽지 않도록 결과를 캐싱한다."""
         return DashboardDataLoader().load_dashboard_data()
