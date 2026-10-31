@@ -15,7 +15,6 @@ OUTPUT_DIR = BASE_DIR / "output"
 
 YEARS = [2023, 2024, 2025]
 
-# 원본 데이터의 실제 좌표계 확인 필요
 SOURCE_CRS = "EPSG:5181"
 TARGET_CRS = "EPSG:4326"
 
@@ -118,6 +117,32 @@ def normalize_code(df, column="상권_코드"):
     return df
 
 
+def add_quarter_column(df):
+    """기준_년분기_코드에서 분기를 추출하여 분기 컬럼 생성"""
+
+    df = df.copy()
+
+    column = "기준_년분기_코드"
+
+    validate_columns(df, [column])
+
+    code = (
+        df[column]
+        .astype("string")
+        .str.strip()
+        .str.replace(r"\.0$", "", regex=True)
+    )
+
+    quarter = code.str.extract(r"^\d{4}([1-4])$", expand=False)
+
+    df["분기"] = pd.to_numeric(
+        quarter,
+        errors="coerce"
+    ).astype("Int64")
+
+    return df
+
+
 # ==========================================
 # 3. 위치 데이터 처리
 # ==========================================
@@ -132,25 +157,20 @@ def convert_coordinates(df):
 
     validate_columns(df, [x_col, y_col])
 
-    # 숫자형 변환
     df[x_col] = pd.to_numeric(df[x_col], errors="coerce")
     df[y_col] = pd.to_numeric(df[y_col], errors="coerce")
 
-    # 유효 좌표 판별
     valid = df[x_col].notna() & df[y_col].notna()
 
-    # 좌표 변환기
     transformer = Transformer.from_crs(
         SOURCE_CRS,
         TARGET_CRS,
         always_xy=True
     )
 
-    # 변환 결과 저장용 컬럼
     df["경도"] = float("nan")
     df["위도"] = float("nan")
 
-    # 유효한 좌표만 변환
     longitude, latitude = transformer.transform(
         df.loc[valid, x_col].to_numpy(),
         df.loc[valid, y_col].to_numpy()
@@ -170,29 +190,23 @@ def process_location():
     if not file_path.exists():
         raise FileNotFoundError(file_path)
 
-    # 1. 읽기 및 기본 전처리
     location = read_csv_file(file_path)
     location = preprocess_data(location)
 
-    # 2. 필수 컬럼 검사
     validate_columns(
         location,
         ["상권_코드", "엑스좌표_값", "와이좌표_값"]
     )
 
-    # 3. 상권 코드 정규화
     location = normalize_code(location)
 
-    # 4. 상권 코드 중복 제거
     location = location.drop_duplicates(
         subset=["상권_코드"],
         keep="first"
     ).copy()
 
-    # 5. 좌표 변환
     location = convert_coordinates(location)
 
-    # 6. 결과 저장
     save_csv_file(
         location,
         "data_location_coordinates.csv"
@@ -212,7 +226,6 @@ def merge_location(df, location):
 
     df = df.copy()
 
-    # 매출 데이터에 없는 위치 컬럼만 추가
     columns = [
         column
         for column in LOCATION_COLUMNS
@@ -259,7 +272,10 @@ def process_year(year, location):
     # 3. 분석 연도 추가
     df["분석연도"] = year
 
-    # 4. 결과 저장
+    # 4. 분기 컬럼 추가
+    df = add_quarter_column(df)
+
+    # 5. 결과 저장
     save_csv_file(df, f"processed_{year}.csv")
 
     print(f"[{year}년 처리 완료] {len(df):,}개 행")
@@ -274,10 +290,8 @@ def process_year(year, location):
 def main():
     print("서울시 상권 데이터 전처리 시작")
 
-    # 1. 위치 데이터 처리
     location = process_location()
 
-    # 2. 연도별 매출 데이터 처리
     results = []
 
     for year in YEARS:
@@ -286,7 +300,6 @@ def main():
         if result is not None:
             results.append(result)
 
-    # 3. 전체 데이터 통합
     if not results:
         print("[종료] 통합할 데이터가 없습니다.")
         return
@@ -297,7 +310,6 @@ def main():
         sort=False
     )
 
-    # 4. 통합 결과 저장
     start_year = min(YEARS)
     end_year = max(YEARS)
 
