@@ -4,50 +4,41 @@ import pandas as pd
 
 
 # ==========================================
-# 1. 파일 경로 설정
+# 1. 데이터 로더 클래스
 # ==========================================
 
-BASE_DIR = Path(__file__).resolve().parent
-DATA_PATH = BASE_DIR / "output" / "combined_2023_2025.csv"
+class DataLoader:
+    """전처리된 CSV 파일을 읽어 DataFrame으로 반환합니다."""
 
+    def __init__(self, file_path=None):
+        self.base_dir = Path(__file__).resolve().parent
+        self.data_path = self.make_path("combined_2023_2025.csv")
+        self.file_path = Path(file_path) if file_path is not None else self.data_path
+        self.encodings = ("utf-8-sig", "utf-8", "cp949", "euc-kr")
 
-# ==========================================
-# 2. 데이터 불러오기
-# ==========================================
+    def make_path(self, file_name):
+        """BASE_DIR를 기준으로 output 폴더의 파일 경로 생성"""
+        return self.base_dir / "output" / file_name
 
-def load_data(file_path=DATA_PATH):
-    """
-    전처리 완료된 통합 CSV 파일을 불러옵니다.
+    def load_data(self, file_path=None):
+        """설정된 CSV를 읽습니다."""
 
-    기본 사용:
-        df = load_data()
+        path = Path(file_path) if file_path is not None else self.file_path
 
-    다른 파일 사용:
-        df = load_data("output/processed_2025.csv")
-    """
+        if not path.exists():
+            raise FileNotFoundError(f"파일을 찾을 수 없습니다: {path}")
 
-    file_path = Path(file_path)
+        for encoding in self.encodings:
+            try:
+                df = pd.read_csv(path, encoding=encoding)
+                print(f"[데이터 로드 성공] {path.name}")
+                print(f"행 개수: {len(df):,}개")
+                return df
 
-    if not file_path.exists():
-        raise FileNotFoundError(
-            f"파일을 찾을 수 없습니다: {file_path}"
-        )
+            except UnicodeDecodeError:
+                continue
 
-    encodings = ["utf-8-sig", "utf-8", "cp949", "euc-kr"]
-
-    for encoding in encodings:
-        try:
-            df = pd.read_csv(file_path, encoding=encoding)
-            print(f"[데이터 로드 성공] {file_path.name}")
-            print(f"행 개수: {len(df):,}개")
-            return df
-
-        except UnicodeDecodeError:
-            continue
-
-    raise ValueError(
-        f"CSV 인코딩을 확인해 주세요: {file_path}"
-    )
+        raise ValueError(f"CSV 인코딩을 확인해 주세요: {path}")
 
 
 # ==========================================
