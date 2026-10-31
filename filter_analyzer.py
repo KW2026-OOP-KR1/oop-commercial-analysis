@@ -93,20 +93,8 @@ class DataFilter:
             filter.by_year([2024, 2025])
         """
 
-        if "분석연도" not in self.df.columns:
-            return self
+        return self._filter_column("분석연도", year)
 
-        if isinstance(year, (list, tuple, set)):
-            self.df = self.df[
-                self.df["분석연도"].isin(year)
-            ]
-
-        else:
-            self.df = self.df[
-                self.df["분석연도"] == year
-            ]
-
-        return self
 
 
     # ------------------------------------------
@@ -739,7 +727,7 @@ class SalesAnalyzer:
         """
         연도별 전체 매출을 반환합니다.
 
-        사용법:
+        사용법
             analyzer.get_year_sales()
         """
 
