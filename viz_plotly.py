@@ -87,72 +87,12 @@ class DonutChartRenderer(ChartRenderer):
         )
         return fig
 
-
-class RadarChartRenderer(ChartRenderer):
-    """레이더(폴라) 차트 전담 렌더러 (요일별 편중도 등에 활용)"""
-    def render(self, labels, values, title, x_title="구분", y_title="금액", **kwargs):
-        # 레이더 차트 특성상 시작점과 끝점을 연결하기 위해 첫 번째 값을 마지막에 추가
-        radar_labels = labels + [labels[0]]
-        radar_values = values + [values[0]]
-        line_color = kwargs.get("line_color", "orange")
-        hovertemplate = kwargs.get("hovertemplate", "%{theta}<br>매출: %{r:,.0f}원<extra></extra>")
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatterpolar(
-            r=radar_values,
-            theta=radar_labels,
-            fill='toself',
-            name=title,
-            line=dict(color=line_color, width=2),
-            hovertemplate=hovertemplate
-        ))
-
-        max_val = max(values) * 1.1 if values else 1
-        fig.update_layout(
-            title=title,
-            polar=dict(
-                radialaxis=dict(visible=True, range=[0, max_val])
-            ),
-            template="plotly_white",
-            showlegend=False
-        )
-        return fig
-
-
-# ==========================================
-# 3. 시각화 메인 클래스
-# ==========================================
-class PlotlyVisualizer:
-
-    def __init__(self, df: pd.DataFrame):
-        self.df = df.copy()
-        self.analyzer = SalesAnalyzer(df)
-        self.bar_renderer = BarChartRenderer()
-        self.line_renderer = LineChartRenderer()
-        self.donut_renderer = DonutChartRenderer()
-        self.radar_renderer = RadarChartRenderer()
-
-    def _empty_figure(self, message):
-        fig = go.Figure()
-        fig.update_layout(title=message, template="plotly_white")
-        return fig
-
-    # ==========================================
-    # 2. 연도 + 분기 비교 (워터폴 차트)
-    # ==========================================
-    def create_quarter_comparison(self, year_a, quarter_a, year_b, quarter_b):
-        comparison_df = self.analyzer.compare_quarters(year_a, quarter_a, year_b, quarter_b)
-
+class WaterfallChartRenderer(ChartRenderer):
+    """분기별 증감 비교 워터폴 차트 및 상세 테이블 전담 렌더러"""
+    def render(self, comparison_df, year_a, quarter_a, year_b, quarter_b, **kwargs):
         if comparison_df is None or comparison_df.empty:
-            missing = []
             return self._empty_figure(f"데이터가 없거나 비교에 필요한 컬럼이 없습니다 ({year_a}년 {quarter_a}분기 vs {year_b}년 {quarter_b}분기)."), go.Figure()
 
-        labels = comparison_df["항목"].tolist()  #
-        
-        labels = ["총매출", "총건수", "평균 객단가"]
-        
-        values_a = []
-        values_b = []
         changes = []
 
         for _, row in comparison_df.iterrows():
@@ -165,9 +105,6 @@ class PlotlyVisualizer:
             diff = row["증감액"]
             rate = row["증감률(%)"]
             
-            values_a.append(a)
-            values_b.append(b)
-            
             changes.append({
                 "항목": item_name, 
                 "기준 기간": a, 
@@ -176,11 +113,18 @@ class PlotlyVisualizer:
                 "증감률(%)": rate
             })
 
-        fig = make_subplots(rows=1, cols=3, subplot_titles=labels, horizontal_spacing=0.1)
+        # 데이터 개수(len(changes))에 맞춰 서브플롯 열(cols)과 제목을 동적으로 생성합니다.
+        col_count = len(changes)
+        subplot_titles = [c["항목"] for c in changes]
+        
+        fig = make_subplots(rows=1, cols=col_count, subplot_titles=subplot_titles, horizontal_spacing=0.05)
 
-        for i, label in enumerate(labels, start=1):
-            a, b = values_a[i-1], values_b[i-1]
-            diff = b - a
+        for i, change in enumerate(changes, start=1):
+            a = change["기준 기간"]
+            b = change["비교 기간"]
+            diff = change["증감액"]
+            label = change["항목"]
+            
             fig.add_trace(
                 go.Waterfall(
                     name=label, orientation="v",
@@ -195,12 +139,13 @@ class PlotlyVisualizer:
                 row=1, col=i
             )
 
+        # 차트 너비는 항목이 늘어날 수 있으므로 개수에 따라 유연하게 조절하면 좋습니다.
         fig.update_layout(
             title=f"<b>{year_a}년 {quarter_a}분기 vs {year_b}년 {quarter_b}분기 지표별 증감 비교</b>",
             template="plotly_white", showlegend=False, height=500, margin=dict(t=80, b=40)
         )
 
-        # 4. 결과 테이블 생성
+        # 결과 테이블 생성 부분은 그대로 유지
         table = go.Figure(data=[go.Table(
             header=dict(
                 values=["항목", "기준 기간", "비교 기간", "증감액", "증감률(%)"],
@@ -220,6 +165,35 @@ class PlotlyVisualizer:
         table.update_layout(title="분기별 증감 상세 분석", template="plotly_white", height=220, margin=dict(t=40, b=10))
 
         return fig, table
+
+
+# ==========================================
+# 3. 시각화 메인 클래스
+# ==========================================
+class PlotlyVisualizer:
+
+    def __init__(self, df: pd.DataFrame):
+        self.df = df.copy()
+        self.analyzer = SalesAnalyzer(df)
+        self.bar_renderer = BarChartRenderer()
+        self.line_renderer = LineChartRenderer()
+        self.donut_renderer = DonutChartRenderer()
+
+    def _empty_figure(self, message):
+        fig = go.Figure()
+        fig.update_layout(title=message, template="plotly_white")
+        return fig
+
+    # ==========================================
+    # 2. 연도 + 분기 비교 (워터폴 차트)
+    # ==========================================
+    def create_quarter_comparison(self, year_a, quarter_a, year_b, quarter_b):
+        # 1. 데이터 가져오기
+        comparison_df = self.analyzer.compare_quarters(year_a, quarter_a, year_b, quarter_b)
+
+        # 2. 렌더러 인스턴스 생성 및 render 메서드 호출
+        renderer = WaterfallChartRenderer()
+        return renderer.render(comparison_df, year_a, quarter_a, year_b, quarter_b)
 
     # ==========================================
     # 3. 시간대별 매출 => 꺾은선 렌더러 적용
@@ -307,11 +281,19 @@ class PlotlyVisualizer:
             return self._empty_figure("요일별 매출 데이터가 없습니다.")
 
         labels = weekday_df["구분"].tolist()
-        values = weekday_df["매출금액"].tolist() if "매출금액" in weekday_df.columns else []
+        values = weekday_df["매출금액"].map(UnitFormatter.to_manwon).tolist() if "매출금액" in weekday_df.columns else []
+        
+        total = sum(values)
+        ratios = [v / total * 100 if total else 0 for v in values]
 
-        return self.radar_renderer.render(
+        return self.bar_renderer.render(
             labels, values,
-            title="요일별(월~일) 매출 편중도 분석 (레이더 차트)"
+            title="요일별(월~일) 매출 편중도 분석",
+            x_title="요일",
+            y_title="매출 금액 (만 원)",
+            texttemplate="%{customdata:.1f}%", 
+            customdata=ratios,
+            hovertemplate="%{x}<br>매출: %{y:,.0f}만원<br>비중: %{customdata:.1f}%<extra></extra>"
         )
 
     # ==========================================
