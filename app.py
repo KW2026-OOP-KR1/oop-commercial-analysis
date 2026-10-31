@@ -88,15 +88,7 @@ class SalesDimension(ABC):
 class WeekdayDimension(SalesDimension):
     name = "요일"
     state_key = "map_weekday"
-    columns = {
-        "월요일": "월요일_매출_금액",
-        "화요일": "화요일_매출_금액",
-        "수요일": "수요일_매출_금액",
-        "목요일": "목요일_매출_금액",
-        "금요일": "금요일_매출_금액",
-        "토요일": "토요일_매출_금액",
-        "일요일": "일요일_매출_금액",
-    }
+    columns = SalesAnalyzer.WEEKDAY_COLUMNS
 
     def _analyze(self, analyzer: SalesAnalyzer) -> pd.DataFrame:
         return analyzer.get_weekday_sales()
@@ -105,14 +97,8 @@ class WeekdayDimension(SalesDimension):
 class TimeDimension(SalesDimension):
     name = "시간대"
     state_key = "map_time"
-    columns = {
-        "00~06시": "시간대_00~06_매출_금액",
-        "06~11시": "시간대_06~11_매출_금액",
-        "11~14시": "시간대_11~14_매출_금액",
-        "14~17시": "시간대_14~17_매출_금액",
-        "17~21시": "시간대_17~21_매출_금액",
-        "21~24시": "시간대_21~24_매출_금액",
-    }
+    # SalesAnalyzer의 키는 '00~06'이므로 슬라이더 이름에 맞춰 '시'를 붙인다.
+    columns = {f"{label}시": column for label, column in SalesAnalyzer.TIME_COLUMNS.items()}
 
     def _analyze(self, analyzer: SalesAnalyzer) -> pd.DataFrame:
         return analyzer.get_time_sales()
@@ -125,14 +111,7 @@ class TimeDimension(SalesDimension):
 class AgeDimension(SalesDimension):
     name = "연령대"
     state_key = "map_age"
-    columns = {
-        "10대": "연령대_10_매출_금액",
-        "20대": "연령대_20_매출_금액",
-        "30대": "연령대_30_매출_금액",
-        "40대": "연령대_40_매출_금액",
-        "50대": "연령대_50_매출_금액",
-        "60대 이상": "연령대_60_이상_매출_금액",
-    }
+    columns = SalesAnalyzer.AGE_COLUMNS
 
     def _analyze(self, analyzer: SalesAnalyzer) -> pd.DataFrame:
         return analyzer.get_age_sales()
@@ -142,10 +121,7 @@ class GenderDimension(SalesDimension):
     """성별은 슬라이더가 아니라 사이드바에서 고르고, 그래프는 남/녀 도넛만 보여 준다."""
     name = "성별"
     state_key = "gender"
-    columns = {
-        "남성": "남성_매출_금액",
-        "여성": "여성_매출_금액",
-    }
+    columns = SalesAnalyzer.GENDER_COLUMNS
 
     def _analyze(self, analyzer: SalesAnalyzer) -> pd.DataFrame:
         sales = analyzer.get_gender_sales()
@@ -649,6 +625,8 @@ class ComparisonSection(DashboardSection):
         "총매출": ("총매출", "만원", UnitFormatter.MANWON),
         "총건수": ("총매출건수", "건", 1),
         "평균객단가": ("평균 객단가", "원", 1),
+        "주중매출": ("주중 매출", "만원", UnitFormatter.MANWON),
+        "주말매출": ("주말 매출", "만원", UnitFormatter.MANWON),
     }
 
     def render(self) -> None:
@@ -674,7 +652,7 @@ class ComparisonSection(DashboardSection):
     def _comparison_figure(self, result: pd.DataFrame, base_label: str, target_label: str) -> go.Figure:
         """지표별 워터폴(기준 → 증감 → 비교). 총매출은 만원, 건수는 건, 객단가는 원"""
         names = [self.ITEMS[item] for item in result["항목"]]
-        fig = make_subplots(rows=1, cols=len(result), horizontal_spacing=0.08,
+        fig = make_subplots(rows=1, cols=len(result), horizontal_spacing=0.05,
                             subplot_titles=[f"{label} ({unit})" for label, unit, _ in names])
         for col, ((_, row), (label, unit, divisor)) in enumerate(zip(result.iterrows(), names), start=1):
             fig.add_trace(go.Waterfall(

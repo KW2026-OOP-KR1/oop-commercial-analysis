@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
-./output
+# 100MB가 넘어 GitHub에 올릴 수 없는 통합 CSV (processed_*.csv는 배포에 필요하므로 추적)
+output/combined_*.csv
 
 # 개인 에디터 설정 및 Code Runner 임시 파일
 .vscode/
