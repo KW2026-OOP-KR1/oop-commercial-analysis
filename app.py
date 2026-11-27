@@ -543,7 +543,17 @@ class MapSection(DashboardSection):
         if map_df.empty:
             map_slot.info("지도에 표시할 위치 데이터가 없습니다.")
             return
-        deck = PydeckVisualizer(map_df, value_name=value_name).create_combined_map()
+        show_gaussian = st.toggle("가우스 산맥 표시", value=True)
+
+        visualizer = PydeckVisualizer(
+            map_df,
+            value_name=value_name
+        )
+
+        if show_gaussian:
+            deck = visualizer.create_combined_map()
+        else:
+            deck = visualizer.create_column_map()
         # 처음 기울기가 60°를 넘으면 Streamlit에서 바탕 지도가 그려지지 않아(확대·축소를 해야 보임) 시작 기울기만 낮춘다.
         # 마우스로 더 기울이는 것(max_pitch)은 그대로 허용한다.
         deck.initial_view_state.pitch = min(deck.initial_view_state.pitch, self.MAP_START_PITCH_LIMIT)
