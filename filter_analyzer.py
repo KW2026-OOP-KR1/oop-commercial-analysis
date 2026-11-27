@@ -1,8 +1,8 @@
 
-
 from pathlib import Path
 
 import pandas as pd
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "output" / "combined_2023_2025.csv"
@@ -148,7 +148,9 @@ class SalesAggregator:
             group_column,
             self.SALES_COLUMN
         ]):
-            return pd.DataFrame()
+            return pd.DataFrame(
+                columns=[group_column, self.SALES_COLUMN]
+            )
 
         return (
             self.df
@@ -173,7 +175,10 @@ class SalesAggregator:
                 "매출금액": self.sum_column(column)
             })
 
-        return pd.DataFrame(result)
+        return pd.DataFrame(
+            result,
+            columns=["구분", "매출금액"]
+        )
 
 
 # ==========================================
@@ -303,7 +308,7 @@ class TemporalAnalyzer:
     def get_peak_time(self, columns=None):
         result = self.get_time_sales(columns)
 
-        if len(result) == 0:
+        if result.empty:
             return None
 
         peak = result.loc[
@@ -318,8 +323,13 @@ class TemporalAnalyzer:
     def get_year_sales(self):
         df = self.aggregator.df
 
-        if "분석연도" not in df.columns:
-            return pd.DataFrame()
+        required = [
+            "분석연도",
+            "당월_매출_금액"
+        ]
+
+        if not self.aggregator.has_columns(required):
+            return pd.DataFrame(columns=required)
 
         return (
             df
@@ -332,7 +342,7 @@ class TemporalAnalyzer:
     def get_year_growth(self):
         result = self.get_year_sales()
 
-        if len(result) == 0:
+        if result.empty:
             return result
 
         result["전년대비_증감액"] = (
@@ -349,8 +359,13 @@ class TemporalAnalyzer:
         df = self.aggregator.df
         column = "기준_년분기_코드"
 
-        if column not in df.columns:
-            return pd.DataFrame()
+        required = [
+            column,
+            "당월_매출_금액"
+        ]
+
+        if not self.aggregator.has_columns(required):
+            return pd.DataFrame(columns=required)
 
         return (
             df
@@ -431,7 +446,7 @@ class DemographicAnalyzer:
     def get_main_age_group(self, columns=None):
         result = self.get_age_sales(columns)
 
-        if len(result) == 0:
+        if result.empty:
             return None
 
         main_age = result.loc[
@@ -455,17 +470,14 @@ class PeriodComparator:
         "분석연도",
         "분기",
         "당월_매출_금액",
-        "당월_매출_건수",
-        "주중_매출_금액",
-        "주말_매출_금액"
+        "당월_매출_건수"
     ]
 
+    # 현재 app.py에서 지원하는 기간 비교 항목
     METRICS = [
         "총매출",
         "총건수",
-        "평균객단가",
-        "주중매출",
-        "주말매출"
+        "평균객단가"
     ]
 
     def __init__(self, aggregator):
@@ -490,21 +502,10 @@ class PeriodComparator:
         aggregator = SalesAggregator(period_df)
         summary = SalesSummary(aggregator)
 
-        temporal = TemporalAnalyzer(
-            aggregator,
-            summary
-        )
-
-        weekday_weekend = (
-            temporal.get_weekday_weekend_sales()
-        )
-
         return {
             "총매출": summary.get_total_sales(),
             "총건수": summary.get_total_count(),
-            "평균객단가": summary.get_average_spending(),
-            "주중매출": weekday_weekend["주중"],
-            "주말매출": weekday_weekend["주말"]
+            "평균객단가": summary.get_average_spending()
         }
 
     def compare_quarters(
@@ -557,7 +558,16 @@ class PeriodComparator:
                 "증감률(%)": rate
             })
 
-        return pd.DataFrame(result)
+        return pd.DataFrame(
+            result,
+            columns=[
+                "항목",
+                "기준 기간",
+                "비교 기간",
+                "증감액",
+                "증감률(%)"
+            ]
+        )
 
 
 # ==========================================
@@ -577,8 +587,17 @@ class SpatialAnalyzer:
             "영역_면적"
         ]
 
+        result_columns = [
+            group,
+            "총매출",
+            "영역면적",
+            "면적당_매출"
+        ]
+
         if not self.aggregator.has_columns(required):
-            return pd.DataFrame()
+            return pd.DataFrame(
+                columns=result_columns
+            )
 
         temp = self.aggregator.df.copy()
 
@@ -609,13 +628,14 @@ class SpatialAnalyzer:
     def get_map_data(self):
         required = [
             "상권_코드_명",
-            "당월_매출_금액",
             "경도",
-            "위도"
+            "위도",
+            "당월_매출_금액"
         ]
 
+        # 빈 결과에서도 컬럼 구조를 유지한다.
         if not self.aggregator.has_columns(required):
-            return pd.DataFrame()
+            return pd.DataFrame(columns=required)
 
         return (
             self.aggregator.df
@@ -678,6 +698,7 @@ class SalesAnalyzer:
         )
 
     # 기존 df 접근 방식 유지
+
     @property
     def df(self):
         return self._aggregator.df
@@ -809,7 +830,10 @@ class SalesAnalyzer:
     def _column_summary(self, columns):
         return self._aggregator.column_summary(columns)
 
-# 기존 함수 기반 인터페이스 호환성 유지
+
+# ==========================================
+# 11. 기존 함수 기반 인터페이스 호환성 유지
+# ==========================================
 
 def load_data(file_path=DATA_PATH):
     return DataLoader(file_path).load_data()
