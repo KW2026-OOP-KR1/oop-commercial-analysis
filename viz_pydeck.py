@@ -359,4 +359,9 @@ class PydeckVisualizer:
         if self.df.empty:
             return pdk.Deck(layers=[], initial_view_state=view_state)
         layers = [make_layer().build() for make_layer in layer_factories]
-        return pdk.Deck(layers=layers, initial_view_state=view_state, tooltip=self.TOOLTIP)
+        return pdk.Deck(
+            layers=layers,
+            initial_view_state=view_state,
+            tooltip=self.TOOLTIP,
+            map_style="road"
+        )
